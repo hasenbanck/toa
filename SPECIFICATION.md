@@ -471,6 +471,45 @@ reliable, streaming compression with exceptional integrity assurance. The combin
 Reed-Solomon protection provides a level of corruption detection and recovery that exceeds both simpler formats
 (like LZIP) and more complex ones (like XZ), while maintaining reasonable implementation complexity.
 
+## 12. Acknowledgements
+
+The Streaming-LZMA format builds upon decades of compression research and development. We acknowledge:
+
+- **Igor Pavlov** for creating the LZMA algorithm and LZMA2 format, which form the compression foundation of this
+  specification
+- **Jack O'Connor, Samuel Neves, Jean-Philippe Aumasson, and Zooko** for developing the Blake3 hash function
+- **Irving S. Reed and Gustave Solomon** for their pioneering work on error correction codes
+- **The XZ Utils project** (Lasse Collin and contributors) for advancing LZMA-based compression formats
+- **The lzip project** (Antonio Diaz Diaz) for demonstrating the value of simplicity in compression format design
+- The broader compression community for continuous innovation in data compression techniques
+
+## 13. Intellectual Property Notice
+
+### 13.1 Specification License
+
+This specification is placed in the **public domain**. Anyone may freely implement, use, modify, or distribute this
+specification without restriction.
+
+### 13.2 Patent Disclaimer
+
+To the best of the authors' knowledge, the Streaming-LZMA format as specified in this document is not encumbered by
+patents. However:
+
+- LZMA and LZMA2 algorithms are believed to be patent-free and have been widely implemented without patent claims for
+  over 20 years
+- Blake3 is explicitly released under CC0 (public domain) with no known patent encumbrances
+- Reed-Solomon codes have been in public use since 1960 with expired foundational patents
+- BCJ filters and Delta encoding are well-established techniques without known patent claims
+
+**This document does not constitute legal advice**. Implementers are responsible for their own patent review and risk 
+assessment. The authors make no warranties regarding patent status and assume no liability for implementations based
+on this specification.
+
+### 13.3 Trademark Notice
+
+"Streaming-LZMA" is not a registered trademark. The name may be used freely to identify implementations of this
+specification.
+
 ## Appendix A: Test Vectors
 
 ### A.1 Minimal File
