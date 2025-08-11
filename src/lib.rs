@@ -3,13 +3,13 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "std"))]
+mod no_std;
+mod reader;
 pub mod reed_solomon;
 #[cfg(feature = "std")]
 mod work_queue;
-mod writer;
-mod reader;
-#[cfg(not(feature = "std"))]
-mod no_std;
+pub mod writer;
 
 #[cfg(feature = "std")]
 pub(crate) use std::io::Error;
@@ -46,7 +46,6 @@ fn set_error(
     }
     shutdown_flag.store(true, std::sync::atomic::Ordering::Release);
 }
-
 
 trait ByteReader {
     fn read_u8(&mut self) -> Result<u8>;
@@ -220,4 +219,71 @@ fn error_unsupported(msg: &'static str) -> Error {
 #[inline(always)]
 fn copy_error(error: &Error) -> Error {
     *error
+}
+
+// Re-export writer types
+pub use writer::{CompressionAlgorithm, Prefilter, SLZOptions, SLZWriter};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_slz_writer_basic() {
+        let mut buffer = Vec::new();
+        let options = SLZOptions::default();
+
+        let mut writer = SLZWriter::new(Cursor::new(&mut buffer), options).unwrap();
+
+        let test_data =
+            b"Hello, SLZ compression world! This is a test of the Streaming LZMA format.";
+        writer.write_all(test_data).unwrap();
+
+        let _inner = writer.finish().unwrap();
+
+        // Check that some data was written (header + compressed data + trailer)
+        assert!(
+            buffer.len() > test_data.len() / 2,
+            "Buffer should contain compressed data"
+        );
+
+        // Check magic bytes
+        assert_eq!(&buffer[0..4], &[0xFE, 0xDC, 0xBA, 0x98]);
+
+        // Check version
+        assert_eq!(buffer[4], 0x01);
+    }
+
+    #[test]
+    fn test_slz_writer_with_block_size() {
+        use core::num::NonZeroU64;
+
+        let mut buffer = Vec::new();
+        let mut options = SLZOptions::default();
+        options.set_block_size(Some(NonZeroU64::new(1024).unwrap()));
+
+        let mut writer = SLZWriter::new(Cursor::new(&mut buffer), options).unwrap();
+
+        // Write more data than block size to test multi-block handling
+        let test_data = vec![b'A'; 2048];
+        writer.write_all(&test_data).unwrap();
+
+        let _inner = writer.finish().unwrap();
+
+        // Check that data was written
+        assert!(buffer.len() > 0);
+
+        // Check magic bytes
+        assert_eq!(&buffer[0..4], &[0xFE, 0xDC, 0xBA, 0x98]);
+    }
+
+    #[test]
+    fn test_slz_options_presets() {
+        for preset in 0..10 {
+            let options = SLZOptions::with_preset(preset);
+            assert!(options.dict_size_log2 >= 12);
+            assert!(options.dict_size_log2 <= 32);
+        }
+    }
 }
