@@ -152,10 +152,10 @@ Each block consists of:
 - **Data**: Compressed data stream
 
 Block properties:
-- Minimum size: 1 B    (size field value 0x00000001)
-- Maximum size: 4 GiB  (size field value 0xFFFFFFFF)
+- Minimum size: 1 B         (size field value 0x00000001)
+- Maximum size: 4 GiB - 1 B (size field value 0xFFFFFFFF)
 - Zero-length blocks are not permitted
-- Files larger than 4 GiB MUST be split across multiple blocks
+- Files larger than 4 GiB - 1 B MUST be split across multiple blocks
 
 **Block Independence**: Each block is completely independent:
 - LZMA/LZMA2 encoder state is reset for each block (fresh dictionary, reset probability models)
