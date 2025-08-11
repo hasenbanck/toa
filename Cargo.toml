@@ -17,3 +17,8 @@ path = "src/bin/slz.rs"
 [dependencies]
 lzma-rust2 = { version = "0.8", default-features = false, features = ["std", "optimization"]  }
 blake3 = { version = "1.8", default-features = false, features = ["std", "no_avx512"] }
+
+
+[features]
+default = ["std"]
+std = []
