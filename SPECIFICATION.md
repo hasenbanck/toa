@@ -59,12 +59,12 @@ The header contains format identification and compression configuration:
 +------+------+------+------+
 | 0xFE | 0xDC | 0xBA | 0x98 |  Magic bytes (4 bytes)
 +------+------+------+------+
-|    Version   |    Config   |  Version and configuration (2 bytes)
+|    Version   |   Config   |  Version and configuration (2 bytes)
 +------+------+------+------+
-|  Compression Properties    |  (1-2 bytes, algorithm-specific)
-+-----------------------------+
-|   Prefilter Properties      |  (0-1 bytes, filter-specific)
-+-----------------------------+
+|  Compression Properties   |  (1-2 bytes, algorithm-specific)
++---------------------------+
+|   Prefilter Properties    |  (0-1 bytes, filter-specific)
++---------------------------+
 ```
 
 ### 3.1 Magic Bytes
@@ -131,7 +131,7 @@ Filter-specific configuration parameters:
 
 ## 4. Blocks Section
 
-The blocks section contains one or more compressed blocks followed by an end marker:
+The blocks section contains any number of compressed blocks followed by an end marker:
 
 ```
 +---------------------+--------------------+
@@ -155,20 +155,41 @@ Block properties:
 - Minimum size: 1 B    (size field value 0x00000001)
 - Maximum size: 4 GiB  (size field value 0xFFFFFFFF)
 - Zero-length blocks are not permitted
-- Each block is independently decompressed
-- Blocks do not share compression dictionary state
+- Files larger than 4 GiB MUST be split across multiple blocks
+
+**Block Independence**: Each block is completely independent:
+- LZMA/LZMA2 encoder state is reset for each block (fresh dictionary, reset probability models)
+- Prefilters (if used) are reset for each block with no state carried between blocks
+- BCJ filters compute jumps/calls relative to the block start, not the file start
+- No compression dictionary or filter state is shared between blocks
+
+**LZMA/LZMA2 Stream Format**:
+- **LZMA**: Raw LZMA stream data without end-of-stream marker (block size provides boundary)
+- **LZMA2**: Raw LZMA2 chunk stream, terminated by block boundary
 
 ### 4.2 Block Size Recommendations
+
+**Compression Ratio Trade-offs**:
+
+The choice of block size directly impacts compression ratio:
+- **Single block** (block size = file size): Maximum compression ratio, no parallelization possible
+- **Multiple blocks**: Reduced compression ratio due to dictionary reset at block boundaries, but enables parallel
+  processing
+
+The compression penalty occurs because:
+1. Each block starts with an empty dictionary, losing context from previous data
+2. Repeated patterns across block boundaries cannot be exploited
+3. Prefilters reset their state, potentially missing optimization opportunities at boundaries
 
 **Optimal configuration**:
 - Block size should be ≥ dictionary size for efficient compression
 - When block size < dictionary size, the dictionary cannot be fully utilized
-- When block size > dictionary size, no additional compression benefit is gained
+- When block size >> dictionary size, diminishing returns on compression benefit
 
 **Recommended defaults**:
-- For streaming: 1-16 MiB blocks
-- Single block will have potentially provide the best compression ratio
-- For parallel processing: Balance between compression and memory usage
+- For maximum compression: Use a single block
+- For streaming with moderate parallelism: 16-64 MiB blocks
+- For high parallelism: 1-16 MiB blocks (accepting compression ratio penalty)
 
 **Memory usage considerations**:
 Parallel decompression requires approximately (dict_size + block_size) × thread_count memory. For example,
@@ -222,6 +243,9 @@ Parameters:
 - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
 - Code: (n=64, k=32, t=16)
 - Generator: α = 2
+
+**Encoding**: The 32-byte Blake3 hash is treated as a sequence of 32 consecutive bytes [h₀, h₁, ..., h₃₁] for
+Reed-Solomon encoding. No byte reordering or integer interpretation is performed.
 
 The code can correct up to 16 byte errors in the hash field.
 
@@ -301,15 +325,19 @@ Decoders MUST abort on:
 
 Decoders MUST report integrity failures for:
 - LZMA/LZMA2 stream corruption
-- Blake3 hash mismatch
-- Reed-Solomon decode failure
+- Blake3 hash mismatch (after Reed-Solomon correction attempt)
+- Reed-Solomon decode failure (uncorrectable errors)
 
-### 8.3 Recovery
+### 8.3 Recovery Limitations
 
-Decoders MAY attempt:
-- Reed-Solomon correction of corrupted Blake3 hash (up to 16 bytes)
-- Partial file recovery up to corruption point when requested by the user
-- Skip corrupted blocks if block boundaries are recoverable when requested by the user
+**The format explicitly does not support partial recovery after corruption**. This is a deliberate design choice:
+- Integrity verification requires the complete data to compute the Blake3 hash
+- Partial recovery would produce data that cannot be verified against the stored hash
+- Block boundaries after corruption are generally unrecoverable due to the lack of synchronization markers
+
+While decoders SHOULD attempt Reed-Solomon correction of a corrupted Blake3 hash (up to 16 bytes), the format
+prioritizes complete data integrity over partial recovery. Users requiring recovery capabilities should employ
+external error recovery systems (e.g., PAR2) or redundant storage.
 
 ## 9. Security Considerations
 
