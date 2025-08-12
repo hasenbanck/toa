@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use slz::{Prefilter, SLZOptions, SLZWriter};
+use slz::{Prefilter, SLZOptions, SLZStreamingWriter};
 
 #[derive(Parser)]
 #[command(name = "slz")]
@@ -27,7 +27,7 @@ struct Cli {
     preset: u32,
 
     /// Block size in bytes
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=4294967295))]
+    #[arg(long, value_name = "bytes", value_parser = clap::value_parser!(u32).range(1..=4294967295))]
     block_size: Option<u32>,
 
     // Prefilter options (XZ-style)
@@ -64,7 +64,7 @@ struct Cli {
     riscv: bool,
 
     /// Use Delta filter with specified distance (1-256)
-    #[arg(long, value_name = "DIST")]
+    #[arg(long, value_name = "distance")]
     delta: Option<u16>,
 
     /// LZMA literal context bits (0-8)
@@ -187,7 +187,7 @@ fn compress_file(cli: &Cli, output_path: &str) -> Result<()> {
         options = options.with_block_size(NonZeroU32::new(block_size));
     }
 
-    let mut slz_writer = SLZWriter::new(output_writer, options);
+    let mut slz_writer = SLZStreamingWriter::new(output_writer, options);
 
     copy_with_progress(&mut input_reader, &mut slz_writer, file_size)?;
 

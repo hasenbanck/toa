@@ -22,7 +22,7 @@ pub use lzma_rust2::Error;
 pub use lzma_rust2::Read;
 #[cfg(not(feature = "std"))]
 pub use lzma_rust2::Write;
-pub use writer::{Prefilter, SLZOptions, SLZWriter};
+pub use writer::{SLZOptions, SLZStreamingWriter};
 
 /// Result type of the crate.
 #[cfg(feature = "std")]
@@ -31,6 +31,46 @@ pub type Result<T> = core::result::Result<T, Error>;
 /// Result type of the crate.
 #[cfg(not(feature = "std"))]
 pub type Result<T> = core::result::Result<T, Error>;
+
+const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
+
+const SLZ_VERSION: u8 = 0x01;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Prefilter {
+    /// No prefilter
+    None,
+    /// Delta filter
+    Delta {
+        /// Filter distance (must be 1..=256)
+        distance: u16,
+    },
+    BcjX86,
+    BcjArm,
+    BcjArmThumb,
+    BcjArm64,
+    BcjSparc,
+    BcjPowerPc,
+    BcjIa64,
+    BcjRiscV,
+}
+
+impl From<Prefilter> for u8 {
+    fn from(value: Prefilter) -> Self {
+        match value {
+            Prefilter::None => 0x00,
+            Prefilter::Delta { .. } => 0x01,
+            Prefilter::BcjX86 => 0x02,
+            Prefilter::BcjArm => 0x03,
+            Prefilter::BcjArmThumb => 0x04,
+            Prefilter::BcjArm64 => 0x05,
+            Prefilter::BcjSparc => 0x06,
+            Prefilter::BcjPowerPc => 0x07,
+            Prefilter::BcjIa64 => 0x08,
+            Prefilter::BcjRiscV => 0x09,
+        }
+    }
+}
 
 /// Helper to set the shared error state and trigger shutdown.
 #[cfg(feature = "std")]
