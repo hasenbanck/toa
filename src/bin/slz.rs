@@ -1,9 +1,12 @@
-use slz::{Prefilter, SLZOptions, SLZWriter};
-use std::env;
-use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Read, Result, Write};
-use std::process;
-use std::time::Instant;
+use std::{
+    env,
+    fs::File,
+    io::{self, BufReader, BufWriter, Read, Result, Write},
+    process,
+    time::Instant,
+};
+
+use slz::{SLZOptions, SLZWriter};
 
 fn print_usage() {
     eprintln!("Usage: slz <filename>");
@@ -39,10 +42,9 @@ fn compress_file(input_path: &str, output_path: &str) -> Result<()> {
     let output_file = File::create(output_path)?;
     let output_writer = BufWriter::new(output_file);
 
-    let mut options = SLZOptions::with_preset(9);
-    options.set_prefilter(Prefilter::BcjX86);
+    let options = SLZOptions::from_preset(9);
 
-    let mut slz_writer = SLZWriter::new(output_writer, options)?;
+    let mut slz_writer = SLZWriter::new(output_writer, options);
 
     copy_with_progress(&mut input_reader, &mut slz_writer, file_size)?;
 

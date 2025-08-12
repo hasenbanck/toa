@@ -1,14 +1,15 @@
 //! Implementation of the single-threaded encoder.
 
-use crate::{ByteWriter, Result, Write, error_invalid_data, reed_solomon::encode};
-use alloc::boxed::Box;
-use alloc::rc::Rc;
-use alloc::vec::Vec;
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use core::cell::{Cell, RefCell};
-use lzma_rust2::filter::bcj::BCJWriter;
-use lzma_rust2::filter::delta::DeltaWriter;
-use lzma_rust2::{LZMAOptions, LZMAWriter};
 use std::num::NonZeroU32;
+
+use lzma_rust2::{
+    LZMAOptions, LZMAWriter,
+    filter::{bcj::BCJWriter, delta::DeltaWriter},
+};
+
+use crate::{ByteWriter, Result, Write, error_invalid_data, reed_solomon::encode};
 
 const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
 
@@ -51,12 +52,18 @@ impl From<Prefilter> for u8 {
 }
 
 /// Options for SLZ compression.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SLZOptions {
     /// Prefilter to apply before compression.
     prefilter: Prefilter,
     /// Dictionary size to use for the LZMA compression algorithm as a power of two.
     dictionary_size_log2: u8,
+    /// LZMA literal context bits (0-8).
+    lc: u8,
+    /// LZMA literal position bits (0-4).
+    lp: u8,
+    /// LZMA position bits (0-4).
+    pb: u8,
     /// Block size in bytes. If None, all data will be written in blocks of 4 GiB - 1 B;
     block_size: Option<NonZeroU32>,
 }
@@ -65,7 +72,10 @@ impl Default for SLZOptions {
     fn default() -> Self {
         Self {
             prefilter: Prefilter::None,
-            dictionary_size_log2: 28,
+            dictionary_size_log2: 26,
+            lc: 3,
+            lp: 0,
+            pb: 2,
             block_size: None,
         }
     }
@@ -86,7 +96,7 @@ impl SLZOptions {
     ];
 
     /// Create options with a specific preset level (0-9).
-    pub fn with_preset(level: u32) -> Self {
+    pub fn from_preset(level: u32) -> Self {
         let level = level.min(9);
 
         let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[level as usize];
@@ -95,49 +105,68 @@ impl SLZOptions {
         Self {
             prefilter: Prefilter::None,
             dictionary_size_log2,
+            lc: 3,
+            lp: 0,
+            pb: 2,
             block_size: NonZeroU32::new(block_size),
         }
     }
 
+    /// Sets the LZMA literal context bits.
+    ///
+    /// Clamped in range of 0 and 8.
+    pub fn with_lc(mut self, lc: u8) -> Self {
+        self.lc = lc.clamp(0, 8);
+        self
+    }
+
+    /// Sets the LZMA literal position bits.
+    ///
+    /// Clamped in range of 0 and 4.
+    pub fn with_lp(mut self, lp: u8) -> Self {
+        self.lp = lp.clamp(0, 4);
+        self
+    }
+
+    /// Sets the LZMA position bits (0-4).
+    ///
+    /// Clamped in range of 0 and 4.
+    pub fn with_pb(mut self, pb: u8) -> Self {
+        self.pb = pb.clamp(0, 4);
+        self
+    }
+
     /// Set the prefilter to use.
-    pub fn set_prefilter(&mut self, prefilter: Prefilter) {
+    ///
+    /// Delta filter distance will be clamped in range of 1 and 256.
+    pub fn with_prefilter(mut self, prefilter: Prefilter) -> Self {
+        let mut prefilter = prefilter;
+
+        if let Prefilter::Delta { distance } = &mut prefilter {
+            *distance = (*distance).clamp(1, 256);
+        }
+
         self.prefilter = prefilter;
+        self
     }
 
     /// Set the dictionary size of the LZMA compression algorithm.
     ///
     /// Clamped in range of 16 (64 KiB) and 32 (4 GiB).
-    pub fn set_dictionary_size(&mut self, dictionary_size_log2: u8) {
+    pub fn with_dictionary_size(mut self, dictionary_size_log2: u8) -> Self {
         self.dictionary_size_log2 = dictionary_size_log2.clamp(16, 32);
+        self
     }
 
     /// Set the block size for multi-block compression.
-    pub fn set_block_size(&mut self, block_size: Option<NonZeroU32>) {
+    pub fn with_block_size(mut self, block_size: Option<NonZeroU32>) -> Self {
         self.block_size = block_size;
+        self
     }
 
     /// Get dictionary size in bytes.
     pub fn dict_size(&self) -> u32 {
         2u32.pow(self.dictionary_size_log2 as u32)
-    }
-
-    /// Validate options and return error if invalid.
-    pub fn validate(&self) -> Result<()> {
-        if self.dictionary_size_log2 < 16 || self.dictionary_size_log2 > 32 {
-            return Err(crate::error_invalid_input(
-                "dictionary size must be between 2^16 and 2^32",
-            ));
-        }
-
-        if let Prefilter::Delta { distance } = self.prefilter
-            && !(1..=256).contains(&distance)
-        {
-            return Err(crate::error_invalid_input(
-                "delta distance must be >= 1 && <= 256",
-            ));
-        }
-
-        Ok(())
     }
 }
 
@@ -214,10 +243,8 @@ pub struct SLZWriter<W> {
 
 impl<W: Write> SLZWriter<W> {
     /// Create a new SLZ writer with the given options.
-    pub fn new(inner: W, options: SLZOptions) -> Result<Self> {
-        options.validate()?;
-
-        Ok(Self {
+    pub fn new(inner: W, options: SLZOptions) -> Self {
+        Self {
             inner: Some(inner),
             options,
             header_written: false,
@@ -225,7 +252,7 @@ impl<W: Write> SLZWriter<W> {
             uncompressed_size: 0,
             compressed_size: Rc::new(Cell::new(0)),
             current_block_data: Vec::new(),
-        })
+        }
     }
 
     /// Write the header.
@@ -245,6 +272,10 @@ impl<W: Write> SLZWriter<W> {
         // Prefilter configuration byte
         let config = u8::from(self.options.prefilter);
         writer.write_u8(config)?;
+
+        // LZMA properties byte: (pb * 5 + lp) * 9 + lc
+        let props = (self.options.pb * 5 + self.options.lp) * 9 + self.options.lc;
+        writer.write_u8(props)?;
 
         // Dictionary size: log2 minus 16
         writer.write_u8(self.options.dictionary_size_log2 - 16)?;
@@ -273,9 +304,9 @@ impl<W: Write> SLZWriter<W> {
             SharedWriter::new(&mut compressed_data, Rc::clone(&self.compressed_size)),
             &LZMAOptions {
                 dict_size: self.options.dict_size(),
-                lc: 3,
-                lp: 0,
-                pb: 2,
+                lc: u32::from(self.options.lc),
+                lp: u32::from(self.options.lp),
+                pb: u32::from(self.options.pb),
                 ..Default::default()
             },
             false,
@@ -362,9 +393,6 @@ impl<W: Write> SLZWriter<W> {
 
         self.write_trailer()?;
 
-        dbg!(self.compressed_size.get());
-        dbg!(self.uncompressed_size);
-
         Ok(self.into_inner())
     }
 }
@@ -425,9 +453,11 @@ impl<W: Write> Write for SLZWriter<W> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use hex_literal::hex;
     use std::io::Cursor;
+
+    use hex_literal::hex;
+
+    use super::*;
 
     #[test]
     fn test_slz_writer_empty() {
@@ -436,10 +466,13 @@ mod tests {
         let options = SLZOptions {
             prefilter: Prefilter::None,
             dictionary_size_log2: 16,
+            lc: 3,
+            lp: 0,
+            pb: 2,
             block_size: None,
         };
 
-        let writer = SLZWriter::new(Cursor::new(&mut buffer), options).unwrap();
+        let writer = SLZWriter::new(Cursor::new(&mut buffer), options);
         let _ = writer.finish().unwrap();
 
         let expected_blake_hash: [u8; 32] =
@@ -447,10 +480,10 @@ mod tests {
         let expected_rs_parity: [u8; 32] =
             hex!("cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d");
 
-        // Total file size should be: 7 (header) + 4 (end marker) + 80 (trailer) = 91 bytes
-        assert_eq!(buffer.len(), 91, "Total file size should be 91 bytes");
+        // Total file size should be: 8 (header) + 4 (end marker) + 80 (trailer) = 92 bytes
+        assert_eq!(buffer.len(), 92, "Total file size should be 92 bytes");
 
-        let (header, rest) = buffer.split_at(7);
+        let (header, rest) = buffer.split_at(8);
         let (blocks, trailer) = rest.split_at(4);
 
         // Magic bytes: 0xFE 0xDC 0xBA 0x98 (4 bytes)
@@ -465,8 +498,11 @@ mod tests {
         // Configuration: No prefilter = 0x00 (1 byte)
         assert_eq!(header[5], 0x00, "Configuration: LZMA + no prefilter");
 
+        // LZMA properties: 93 ( 2 (pb) * 5 + 0 (lp)) * 9 + 3 (lc)
+        assert_eq!(header[6], 0x5D, "Configuration: LZMA + no prefilter");
+
         // LZMA dictionary size: 16 - 16 = 0 (1 byte)
-        assert_eq!(header[6], 0x00, "LZMA dictionary size should be 0");
+        assert_eq!(header[7], 0x00, "LZMA dictionary size should be 0");
 
         // End-of-blocks marker: 0x00 0x00 0x00 0x00
         assert_eq!(blocks, &[0x00, 0x00, 0x00, 0x00], "End-of-blocks marker");
@@ -492,5 +528,7 @@ mod tests {
 
         // Reed-Solomon parity (32 bytes)
         assert_eq!(&trailer[48..80], &expected_rs_parity, "RS parity");
+
+        hexdump::hexdump(&buffer);
     }
 }

@@ -24,7 +24,6 @@ pub use no_std::Error;
 pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
-
 pub use writer::{Prefilter, SLZOptions, SLZWriter};
 
 /// Result type of the crate.

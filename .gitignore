@@ -1,2 +1,6 @@
 .idea
 /target
+/tests/data/*.tar
+/tests/data/*.xz
+/tests/data/*.lz
+/tests/data/*.slz

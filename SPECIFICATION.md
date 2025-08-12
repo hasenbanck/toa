@@ -536,27 +536,15 @@ specification.
 
 ### A.1 Minimal File
 
-Hexdump of a minimal Streaming-LZMA file using LZMA + no prefilter and no content:
+Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 3) + no prefilter and no content:
 
 ```
-|fedcba98 01005d06 00000000 00000000| ......]......... 00000000
+|fedcba98 01005d00 00000000 00000000| ......]......... 00000000
 |00000000 00000000 00000000 af1349b9| ..............I. 00000010
 |f5f9a1a6 a0404dea 36dcc949 9bcb25c9| .....@M.6..I..%. 00000020
 |adc112b7 cc9a93ca e41f3262 cedfc1cc| ..........2b.... 00000030
 |789afb17 6bf1fb71 a6756a5b 315bdbc2| x...k..q.uj[1[.. 00000040
-|322f987f f3aa7b0c 7c2a6a7d         | 2/....{.|*j}     00000050
-```
-
-Hexdump of a minimal Streaming LZMA file using LZMA2 + no prefilter and single zero byte content:
-
-```
-|fedcba98 01010805 00000001 00000000| ................ 00000000
-|00000000 01000000 00000000 05000000| ................ 00000010
-|00000000 2d3adedf f11b61f1 4c886e35| ....-:....a.L.n5 00000020
-|afa03673 6dcd87a7 4d27b5c1 510225d0| ..6sm...M'..Q.%. 00000030
-|f592e213 c213b18e a038cbd9 669481d7| .........8..f... 00000040
-|382c07d1 0c82c200 97993342 3a3340c2| 8,........3B:3@. 00000050
-|48382018                           | H8 .             00000060
+|322f987f f3aa7b0c 7c2a6a7d|          2/....{.|*j}     00000050
 ```
 
 ### A.2 Reed-Solomon Implementation

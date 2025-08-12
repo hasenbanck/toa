@@ -19,7 +19,7 @@ pub const CODEWORD_SIZE: usize = DATA_LEN + PARITY_LEN;
 const MAX_POLY: usize = CODEWORD_SIZE;
 
 // GF(256) parameters
-const PRIMITIVE_POLY: u16 = 0x11d; // (x^8 + x^4 + x^3 + x^2 + 1)
+const PRIMITIVE_POLY: u16 = 0x11D; // (x^8 + x^4 + x^3 + x^2 + 1)
 const GF_EXP_LEN: usize = 512;
 const GF_LOG_LEN: usize = 256;
 
@@ -36,8 +36,8 @@ const fn build_gf_tables() -> GfTables {
     let mut i = 0usize;
     let mut x: u16 = 1;
     while i < 255 {
-        exp[i] = (x & 0xff) as u8;
-        log[(x & 0xff) as usize] = i as u8;
+        exp[i] = (x & 0xFF) as u8;
+        log[(x & 0xFF) as usize] = i as u8;
         x <<= 1;
         if (x & 0x100) != 0 {
             x ^= PRIMITIVE_POLY;
@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_too_many_errors_fails() {
-        let mut rng = Lcg::new(0xdeadbeef);
+        let mut rng = Lcg::new(0xDEADBEEF);
 
         let mut data = [0u8; DATA_LEN];
 
