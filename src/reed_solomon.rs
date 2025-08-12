@@ -1,10 +1,10 @@
 //! Stack only Reed–Solomon implementation.
 //!
 //! Specification:
-//! - Field: GF(2^8)
+//! - Field: GF(2^8) = GF(256)
 //! - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-//! - Code: (n=64, k=32, t=16)
 //! - Generator: α = 2
+//! - Code: (n=64, k=32, t=16)
 
 /// The size of the data payload.
 pub const DATA_LEN: usize = 32;

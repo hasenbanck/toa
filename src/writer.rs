@@ -1,177 +1,214 @@
 //! Implementation of the single-threaded encoder.
 
+use crate::{ByteWriter, Result, Write, error_invalid_data, reed_solomon::encode};
+use alloc::boxed::Box;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::num::NonZeroU64;
-
-use crate::{ByteWriter, Result, Write, reed_solomon::encode};
+use core::cell::{Cell, RefCell};
+use lzma_rust2::filter::bcj::BCJWriter;
+use lzma_rust2::filter::delta::DeltaWriter;
+use lzma_rust2::{LZMAOptions, LZMAWriter};
+use std::num::NonZeroU32;
 
 const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
+
 const SLZ_VERSION: u8 = 0x01;
-
-const TRAILER_SIZE: usize = 80;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompressionAlgorithm {
-    LZMA = 0x00,
-    LZMA2 = 0x01,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Prefilter {
-    None = 0x00,
-    Delta = 0x01,
-    BcjX86 = 0x02,
-    BcjArm = 0x03,
-    BcjArmThumb = 0x04,
-    BcjArm64 = 0x05,
-    BcjSparc = 0x06,
-    BcjPowerPc = 0x07,
-    BcjIa64 = 0x08,
-    BcjRiscV = 0x09,
+    /// No prefilter
+    None,
+    /// Delta filter
+    Delta {
+        /// Filter distance (must be 1..=256)
+        distance: u16,
+    },
+    BcjX86,
+    BcjArm,
+    BcjArmThumb,
+    BcjArm64,
+    BcjSparc,
+    BcjPowerPc,
+    BcjIa64,
+    BcjRiscV,
+}
+
+impl From<Prefilter> for u8 {
+    fn from(value: Prefilter) -> Self {
+        match value {
+            Prefilter::None => 0x00,
+            Prefilter::Delta { .. } => 0x01,
+            Prefilter::BcjX86 => 0x02,
+            Prefilter::BcjArm => 0x03,
+            Prefilter::BcjArmThumb => 0x04,
+            Prefilter::BcjArm64 => 0x05,
+            Prefilter::BcjSparc => 0x06,
+            Prefilter::BcjPowerPc => 0x07,
+            Prefilter::BcjIa64 => 0x08,
+            Prefilter::BcjRiscV => 0x09,
+        }
+    }
 }
 
 /// Options for SLZ compression.
 #[derive(Debug, Clone)]
 pub struct SLZOptions {
-    /// Compression algorithm to use.
-    pub algorithm: CompressionAlgorithm,
     /// Prefilter to apply before compression.
-    pub prefilter: Prefilter,
-    /// Dictionary size as power of 2 (12-32, representing 4KB to 4GB).
-    pub dict_size_log2: u8,
-    /// LZMA literal context bits (0-8).
-    pub lc: u8,
-    /// LZMA literal position bits (0-4).
-    pub lp: u8,
-    /// LZMA position bits (0-4).
-    pub pb: u8,
-    /// Delta filter distance (1-256) - only used if prefilter is Delta.
-    pub delta_distance: u8,
-    /// Block size in bytes. If None, all data is written as a single block.
-    pub block_size: Option<NonZeroU64>,
+    prefilter: Prefilter,
+    /// Dictionary size to use for the LZMA compression algorithm as a power of two.
+    dictionary_size_log2: u8,
+    /// Block size in bytes. If None, all data will be written in blocks of 4 GiB - 1 B;
+    block_size: Option<NonZeroU32>,
 }
 
 impl Default for SLZOptions {
     fn default() -> Self {
         Self {
-            algorithm: CompressionAlgorithm::LZMA2,
             prefilter: Prefilter::None,
-            dict_size_log2: 23, // 8MB
-            lc: 3,
-            lp: 0,
-            pb: 2,
-            delta_distance: 1,
+            dictionary_size_log2: 28,
             block_size: None,
         }
     }
 }
 
 impl SLZOptions {
+    const PRESET_TO_DICT_SIZE_LOG2: &'static [u8] = &[
+        18, // 256 KiB
+        20, // 1 MiB
+        21, // 2 MiB
+        22, // 4 MiB
+        22, // 4 MiB
+        23, // 8 MiB
+        23, // 8 MiB
+        24, // 16 MiB
+        25, // 32 MiB
+        26, // 64 MiB
+    ];
+
     /// Create options with a specific preset level (0-9).
     pub fn with_preset(level: u32) -> Self {
-        let mut options = Self::default();
-        match level {
-            0..=1 => {
-                options.dict_size_log2 = 16; // 64KB
-            }
-            2..=3 => {
-                options.dict_size_log2 = 20; // 1MB
-            }
-            4..=5 => {
-                options.dict_size_log2 = 22; // 4MB
-            }
-            6..=7 => {
-                options.dict_size_log2 = 24; // 16MB
-            }
-            8..=9 => {
-                options.dict_size_log2 = 26; // 64MB
-            }
-            _ => {
-                options.dict_size_log2 = 23; // 8MB (default)
-            }
+        let level = level.min(9);
+
+        let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[level as usize];
+        let block_size = u32::MAX;
+
+        Self {
+            prefilter: Prefilter::None,
+            dictionary_size_log2,
+            block_size: NonZeroU32::new(block_size),
         }
-        options
+    }
+
+    /// Set the prefilter to use.
+    pub fn set_prefilter(&mut self, prefilter: Prefilter) {
+        self.prefilter = prefilter;
+    }
+
+    /// Set the dictionary size of the LZMA compression algorithm.
+    ///
+    /// Clamped in range of 16 (64 KiB) and 32 (4 GiB).
+    pub fn set_dictionary_size(&mut self, dictionary_size_log2: u8) {
+        self.dictionary_size_log2 = dictionary_size_log2.clamp(16, 32);
     }
 
     /// Set the block size for multi-block compression.
-    pub fn set_block_size(&mut self, block_size: Option<NonZeroU64>) {
+    pub fn set_block_size(&mut self, block_size: Option<NonZeroU32>) {
         self.block_size = block_size;
     }
 
     /// Get dictionary size in bytes.
     pub fn dict_size(&self) -> u32 {
-        if self.dict_size_log2 > 32 {
-            return u32::MAX;
-        }
-        1u32 << self.dict_size_log2
+        2u32.pow(self.dictionary_size_log2 as u32)
     }
 
     /// Validate options and return error if invalid.
     pub fn validate(&self) -> Result<()> {
-        if self.dict_size_log2 < 12 || self.dict_size_log2 > 32 {
+        if self.dictionary_size_log2 < 16 || self.dictionary_size_log2 > 32 {
             return Err(crate::error_invalid_input(
-                "dictionary size must be between 2^12 and 2^32",
+                "dictionary size must be between 2^16 and 2^32",
             ));
         }
-        if self.lc > 8 {
-            return Err(crate::error_invalid_input("lc must be <= 8"));
+
+        if let Prefilter::Delta { distance } = self.prefilter
+            && !(1..=256).contains(&distance)
+        {
+            return Err(crate::error_invalid_input(
+                "delta distance must be >= 1 && <= 256",
+            ));
         }
-        if self.lp > 4 {
-            return Err(crate::error_invalid_input("lp must be <= 4"));
-        }
-        if self.pb > 4 {
-            return Err(crate::error_invalid_input("pb must be <= 4"));
-        }
-        if self.delta_distance == 0 {
-            return Err(crate::error_invalid_input("delta distance must be >= 1"));
-        }
+
         Ok(())
     }
 }
 
-struct CountingWriter<W> {
-    inner: W,
-    bytes_written: u64,
+trait FinishableWriter: Write {
+    fn finish(self: Box<Self>) -> Result<()>;
 }
 
-impl<W> CountingWriter<W> {
-    fn new(inner: W) -> Self {
+impl<W: Write> FinishableWriter for LZMAWriter<W> {
+    fn finish(self: Box<Self>) -> Result<()> {
+        (*self).finish()?;
+        Ok(())
+    }
+}
+
+impl<W: FinishableWriter> FinishableWriter for DeltaWriter<W> {
+    fn finish(self: Box<Self>) -> Result<()> {
+        let inner = (*self).into_inner();
+        Box::new(inner).finish()
+    }
+}
+
+impl<W: FinishableWriter> FinishableWriter for BCJWriter<W> {
+    fn finish(self: Box<Self>) -> Result<()> {
+        let inner = (*self).into_inner();
+        Box::new(inner).finish()
+    }
+}
+
+impl<'writer> FinishableWriter for Box<dyn FinishableWriter + 'writer> {
+    fn finish(self: Box<Self>) -> Result<()> {
+        (*self).finish()
+    }
+}
+
+struct SharedWriter<W> {
+    inner: Rc<RefCell<W>>,
+    bytes_written: Rc<Cell<u64>>,
+}
+
+impl<W> SharedWriter<W> {
+    fn new(inner: W, bytes_written: Rc<Cell<u64>>) -> Self {
         Self {
-            inner,
-            bytes_written: 0,
+            inner: Rc::new(RefCell::new(inner)),
+            bytes_written,
         }
     }
-
-    fn bytes_written(&self) -> u64 {
-        self.bytes_written
-    }
-
-    fn into_inner(self) -> W {
-        self.inner
-    }
 }
 
-impl<W: Write> Write for CountingWriter<W> {
+impl<W: Write> Write for SharedWriter<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        let bytes_written = self.inner.write(buf)?;
-        self.bytes_written += bytes_written as u64;
+        let mut writer = self.inner.borrow_mut();
+        let bytes_written = writer.write(buf)?;
+        self.bytes_written
+            .set(self.bytes_written.get() + bytes_written as u64);
         Ok(bytes_written)
     }
 
     fn flush(&mut self) -> Result<()> {
-        self.inner.flush()
+        let mut writer = self.inner.borrow_mut();
+        writer.flush()
     }
 }
 
 /// A single-threaded SLZ compressor.
-pub struct SLZWriter<W: Write> {
+pub struct SLZWriter<W> {
     inner: Option<W>,
     options: SLZOptions,
     header_written: bool,
-    finished: bool,
     hasher: blake3::Hasher,
     uncompressed_size: u64,
-    compressed_size: u64,
+    compressed_size: Rc<Cell<u64>>,
     current_block_data: Vec<u8>,
 }
 
@@ -184,26 +221,11 @@ impl<W: Write> SLZWriter<W> {
             inner: Some(inner),
             options,
             header_written: false,
-            finished: false,
             hasher: blake3::Hasher::new(),
             uncompressed_size: 0,
-            compressed_size: 0,
+            compressed_size: Rc::new(Cell::new(0)),
             current_block_data: Vec::new(),
         })
-    }
-
-    /// Consume the writer and return the inner writer.
-    pub fn into_inner(mut self) -> W {
-        self.inner.take().expect("inner writer not set")
-    }
-
-    /// Check if we should finish the current block and start a new one.
-    fn should_finish_block(&self) -> bool {
-        if let Some(block_size) = self.options.block_size {
-            self.current_block_data.len() as u64 >= block_size.get()
-        } else {
-            false
-        }
     }
 
     /// Write the header.
@@ -220,197 +242,135 @@ impl<W: Write> SLZWriter<W> {
         // Version
         writer.write_u8(SLZ_VERSION)?;
 
-        // Configuration byte
-        let config = (self.options.prefilter as u8) << 3 | (self.options.algorithm as u8);
+        // Prefilter configuration byte
+        let config = u8::from(self.options.prefilter);
         writer.write_u8(config)?;
 
-        // Compression properties
-        match self.options.algorithm {
-            CompressionAlgorithm::LZMA => {
-                // LZMA properties byte: (pb * 5 + lp) * 9 + lc
-                let props = (self.options.pb * 5 + self.options.lp) * 9 + self.options.lc;
-                writer.write_u8(props)?;
-                // Dictionary size log2 minus 12
-                writer.write_u8(self.options.dict_size_log2 - 12)?;
-            }
-            CompressionAlgorithm::LZMA2 => {
-                // Dictionary size log2 minus 12
-                writer.write_u8(self.options.dict_size_log2 - 12)?;
-            }
-        }
+        // Dictionary size: log2 minus 16
+        writer.write_u8(self.options.dictionary_size_log2 - 16)?;
 
         // Prefilter properties
-        match self.options.prefilter {
-            Prefilter::Delta => {
-                writer.write_u8(self.options.delta_distance - 1)?;
-            }
-            _ => {}
+        if let Prefilter::Delta { distance } = self.options.prefilter {
+            writer.write_u8(distance as u8 - 1)?;
         }
 
         self.header_written = true;
+
         Ok(())
     }
 
-    /// Compress and write a block of data.
-    fn write_block(&mut self, data: &[u8]) -> Result<()> {
-        if data.is_empty() {
+    /// Compress and write a block of data with size prepended.
+    fn compress_and_write_block(&mut self) -> Result<()> {
+        if self.current_block_data.is_empty() {
             return Ok(());
         }
 
-        // Apply prefilter if needed
-        let filtered_data = self.apply_prefilter(data)?;
+        // Create a buffer to collect compressed data.
+        let mut compressed_data = Vec::new();
 
-        // Compress the data
-        let compressed_data = self.compress_data(&filtered_data)?;
+        // Set up compression chain.
+        let mut writer: Box<dyn FinishableWriter> = Box::new(LZMAWriter::new_no_header(
+            SharedWriter::new(&mut compressed_data, Rc::clone(&self.compressed_size)),
+            &LZMAOptions {
+                dict_size: self.options.dict_size(),
+                lc: 3,
+                lp: 0,
+                pb: 2,
+                ..Default::default()
+            },
+            false,
+        )?);
 
-        // Write block size and data
-        let writer = self.inner.as_mut().expect("inner writer not set");
-        let block_size = compressed_data.len() as u32;
-        writer.write_u32(block_size)?;
-        writer.write_all(&compressed_data)?;
+        // Apply prefilter if configured
+        match self.options.prefilter {
+            Prefilter::None => {}
+            Prefilter::Delta { distance } => {
+                writer = Box::new(DeltaWriter::new(writer, distance as usize))
+            }
+            Prefilter::BcjX86 => writer = Box::new(BCJWriter::new_x86(writer, 0)),
+            Prefilter::BcjArm => writer = Box::new(BCJWriter::new_arm(writer, 0)),
+            Prefilter::BcjArmThumb => writer = Box::new(BCJWriter::new_arm_thumb(writer, 0)),
+            Prefilter::BcjArm64 => writer = Box::new(BCJWriter::new_arm64(writer, 0)),
+            Prefilter::BcjSparc => writer = Box::new(BCJWriter::new_sparc(writer, 0)),
+            Prefilter::BcjPowerPc => writer = Box::new(BCJWriter::new_ppc(writer, 0)),
+            Prefilter::BcjIa64 => writer = Box::new(BCJWriter::new_ia64(writer, 0)),
+            Prefilter::BcjRiscV => writer = Box::new(BCJWriter::new_riscv(writer, 0)),
+        }
 
-        self.compressed_size += compressed_data.len() as u64;
+        // Compress the data.
+        writer.write_all(self.current_block_data.as_slice())?;
+        writer.finish()?;
+
+        let compressed_size = self.compressed_size.get();
+
+        if compressed_size > u32::MAX as u64 {
+            return Err(error_invalid_data("compressed block too large"));
+        }
+
+        // Write block size (4 bytes, little-endian).
+        let inner_writer = self.inner.as_mut().expect("inner writer not set");
+        inner_writer.write_u32(compressed_size as u32)?;
+
+        // Write compressed data.
+        inner_writer.write_all(&compressed_data)?;
 
         Ok(())
-    }
-
-    /// Apply prefilter to data.
-    fn apply_prefilter(&self, data: &[u8]) -> Result<Vec<u8>> {
-        match self.options.prefilter {
-            Prefilter::None => Ok(data.to_vec()),
-            Prefilter::Delta => {
-                let mut filtered = data.to_vec();
-                let distance = self.options.delta_distance as usize;
-
-                for i in distance..filtered.len() {
-                    filtered[i] = filtered[i].wrapping_sub(filtered[i - distance]);
-                }
-
-                Ok(filtered)
-            }
-            _ => {
-                // BCJ filters would be implemented here
-                // For now, just return the data unchanged
-                Ok(data.to_vec())
-            }
-        }
-    }
-
-    /// Compress data using the configured algorithm.
-    fn compress_data(&self, data: &[u8]) -> Result<Vec<u8>> {
-        match self.options.algorithm {
-            CompressionAlgorithm::LZMA => self.compress_lzma(data),
-            CompressionAlgorithm::LZMA2 => self.compress_lzma2(data),
-        }
-    }
-
-    /// Compress data using LZMA.
-    fn compress_lzma(&self, data: &[u8]) -> Result<Vec<u8>> {
-        use lzma_rust2::{LZMAOptions, LZMAWriter};
-
-        let mut lzma_options = LZMAOptions::default();
-        lzma_options.dict_size = self.options.dict_size();
-        lzma_options.lc = self.options.lc as u32;
-        lzma_options.lp = self.options.lp as u32;
-        lzma_options.pb = self.options.pb as u32;
-
-        let mut compressed = Vec::new();
-        {
-            let mut writer = LZMAWriter::new_no_header(&mut compressed, &lzma_options, false)
-                .map_err(|_| crate::error_other("failed to create LZMA writer"))?;
-
-            writer
-                .write_all(data)
-                .map_err(|_| crate::error_other("failed to write LZMA data"))?;
-
-            writer
-                .finish()
-                .map_err(|_| crate::error_other("failed to finish LZMA compression"))?;
-        }
-
-        Ok(compressed)
-    }
-
-    /// Compress data using LZMA2.
-    fn compress_lzma2(&self, data: &[u8]) -> Result<Vec<u8>> {
-        use lzma_rust2::{LZMA2Options, LZMA2Writer};
-
-        let mut lzma2_options = LZMA2Options::default();
-        lzma2_options.lzma_options.dict_size = self.options.dict_size();
-
-        let mut compressed = Vec::new();
-        {
-            let mut writer = LZMA2Writer::new(&mut compressed, lzma2_options);
-
-            writer
-                .write_all(data)
-                .map_err(|_| crate::error_other("failed to write LZMA2 data"))?;
-
-            writer
-                .finish()
-                .map_err(|_| crate::error_other("failed to finish LZMA2 compression"))?;
-        }
-
-        Ok(compressed)
     }
 
     /// Write the trailer with Blake3 hash and Reed-Solomon protection.
     fn write_trailer(&mut self) -> Result<()> {
         let writer = self.inner.as_mut().expect("inner writer not set");
 
-        // Write end-of-blocks marker
+        // Write end-of-blocks marker.
         writer.write_u32(0)?;
 
-        // Write size fields
+        // Write size fields.
         writer.write_u64(self.uncompressed_size)?;
-        writer.write_u64(self.compressed_size)?;
+        writer.write_u64(self.compressed_size.get())?;
 
-        // Finalize Blake3 hash
+        // Finalize Blake3 hash.
         let hash = self.hasher.finalize();
         let hash_bytes = hash.as_bytes();
 
-        // Generate Reed-Solomon parity
+        // Generate Reed-Solomon parity.
         let parity = encode(hash_bytes);
 
-        // Write Blake3 hash
+        // Write Blake3 hash.
         writer.write_all(hash_bytes)?;
 
-        // Write Reed-Solomon parity
+        // Write Reed-Solomon parity.
         writer.write_all(&parity)?;
 
         Ok(())
     }
 
+    /// Consume the writer and return the inner writer.
+    pub fn into_inner(mut self) -> W {
+        self.inner.take().expect("inner writer not set")
+    }
+
     /// Finish writing the SLZ stream.
     pub fn finish(mut self) -> Result<W> {
-        if self.finished {
-            return Ok(self.into_inner());
-        }
-
         if !self.header_written {
             self.write_header()?;
         }
 
         // Write any remaining data in the current block
         if !self.current_block_data.is_empty() {
-            let data = core::mem::take(&mut self.current_block_data);
-            self.write_block(&data)?;
+            self.compress_and_write_block()?;
         }
 
-        // Write trailer
         self.write_trailer()?;
 
-        self.finished = true;
+        dbg!(self.compressed_size.get());
+        dbg!(self.uncompressed_size);
+
         Ok(self.into_inner())
     }
 }
 
 impl<W: Write> Write for SLZWriter<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        if self.finished {
-            return Err(crate::error_invalid_input("SLZ writer already finished"));
-        }
-
         if buf.is_empty() {
             return Ok(0);
         }
@@ -419,40 +379,37 @@ impl<W: Write> Write for SLZWriter<W> {
             self.write_header()?;
         }
 
-        // Update hash with the uncompressed data
-        self.hasher.update(buf);
-        self.uncompressed_size += buf.len() as u64;
-
-        let mut remaining = buf;
         let mut total_written = 0;
+        let mut remaining = buf;
 
         while !remaining.is_empty() {
-            if self.should_finish_block() && !self.current_block_data.is_empty() {
-                // Finish current block
-                let data = core::mem::take(&mut self.current_block_data);
-                self.write_block(&data)?;
-            }
-
-            // Determine how much to add to current block
-            let bytes_to_add = if let Some(block_size) = self.options.block_size {
-                let space_in_block = block_size.get() - self.current_block_data.len() as u64;
-                (remaining.len() as u64).min(space_in_block) as usize
+            // Calculate how much space is left in the current block
+            let block_limit = if let Some(block_size) = self.options.block_size {
+                block_size.get() as usize
             } else {
-                remaining.len()
+                u32::MAX as usize // Max block size is 4 GiB - 1
             };
 
-            if bytes_to_add == 0 {
-                // Block is full, finish it
-                let data = core::mem::take(&mut self.current_block_data);
-                self.write_block(&data)?;
+            let space_left = block_limit.saturating_sub(self.current_block_data.len());
+
+            if space_left == 0 {
+                // Current block is full, compress and write it out
+                self.compress_and_write_block()?;
+                self.current_block_data.clear();
                 continue;
             }
 
-            // Add data to current block
-            self.current_block_data
-                .extend_from_slice(&remaining[..bytes_to_add]);
-            total_written += bytes_to_add;
-            remaining = &remaining[bytes_to_add..];
+            // Take as much data as fits in the current block
+            let to_write = remaining.len().min(space_left);
+            let chunk = &remaining[..to_write];
+
+            // Add to block buffer and update hash
+            self.current_block_data.extend_from_slice(chunk);
+            self.hasher.update(chunk);
+            self.uncompressed_size += to_write as u64;
+
+            total_written += to_write;
+            remaining = &remaining[to_write..];
         }
 
         Ok(total_written)
@@ -463,5 +420,77 @@ impl<W: Write> Write for SLZWriter<W> {
             writer.flush()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex_literal::hex;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_slz_writer_empty() {
+        let mut buffer = Vec::new();
+
+        let options = SLZOptions {
+            prefilter: Prefilter::None,
+            dictionary_size_log2: 16,
+            block_size: None,
+        };
+
+        let writer = SLZWriter::new(Cursor::new(&mut buffer), options).unwrap();
+        let _ = writer.finish().unwrap();
+
+        let expected_blake_hash: [u8; 32] =
+            hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
+        let expected_rs_parity: [u8; 32] =
+            hex!("cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d");
+
+        // Total file size should be: 7 (header) + 4 (end marker) + 80 (trailer) = 91 bytes
+        assert_eq!(buffer.len(), 91, "Total file size should be 91 bytes");
+
+        let (header, rest) = buffer.split_at(7);
+        let (blocks, trailer) = rest.split_at(4);
+
+        // Magic bytes: 0xFE 0xDC 0xBA 0x98 (4 bytes)
+        assert_eq!(header[0], 0xFE, "Magic byte 0");
+        assert_eq!(header[1], 0xDC, "Magic byte 1");
+        assert_eq!(header[2], 0xBA, "Magic byte 2");
+        assert_eq!(header[3], 0x98, "Magic byte 3");
+
+        // Version: 0x01 (1 byte)
+        assert_eq!(header[4], 0x01, "Format version should be 1");
+
+        // Configuration: No prefilter = 0x00 (1 byte)
+        assert_eq!(header[5], 0x00, "Configuration: LZMA + no prefilter");
+
+        // LZMA dictionary size: 16 - 16 = 0 (1 byte)
+        assert_eq!(header[6], 0x00, "LZMA dictionary size should be 0");
+
+        // End-of-blocks marker: 0x00 0x00 0x00 0x00
+        assert_eq!(blocks, &[0x00, 0x00, 0x00, 0x00], "End-of-blocks marker");
+
+        assert_eq!(trailer.len(), 80, "Trailer should be exactly 80 bytes");
+
+        // Uncompressed size: 0 (8 bytes, little-endian)
+        assert_eq!(
+            &trailer[0..8],
+            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            "Uncompressed size should be 0"
+        );
+
+        // Compressed size: 0 (8 bytes, little-endian)
+        assert_eq!(
+            &trailer[8..16],
+            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            "Compressed size should be 0"
+        );
+
+        // Blake3 hash of empty data (32 bytes)
+        assert_eq!(&trailer[16..48], &expected_blake_hash, "Blake3 hash");
+
+        // Reed-Solomon parity (32 bytes)
+        assert_eq!(&trailer[48..80], &expected_rs_parity, "RS parity");
     }
 }

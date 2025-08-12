@@ -70,6 +70,7 @@ The header contains format identification and compression configuration:
 ### 3.1 Magic Bytes
 
 The file begins with the four-byte sequence 0xFE 0xDC 0xBA 0x98. This sequence:
+
 - Is not valid UTF-8
 - Contains no printable ASCII characters
 - Provides strong file type identification
@@ -109,6 +110,7 @@ One byte containing compression algorithm and prefilter selection:
 Algorithm-specific compression parameters:
 
 **LZMA** (2 bytes):
+
 - Byte 0: Properties byte encoding (pb * 5 + lp) * 9 + lc
     - lc: number of literal context bits (0-8)
     - lp: number of literal position bits (0-4)
@@ -116,6 +118,7 @@ Algorithm-specific compression parameters:
 - Byte 1: Dictionary size as power of 2 (size = 2^(n+12))
 
 **LZMA2** (1 byte):
+
 - Byte 0: Dictionary size as power of 2 (size = 2^(n+12))
 
 Valid dictionary sizes range from 4 KiB (n=0) to 4 GiB (n=20).
@@ -125,6 +128,7 @@ Valid dictionary sizes range from 4 KiB (n=0) to 4 GiB (n=20).
 Filter-specific configuration parameters:
 
 **Delta filter** (1 byte):
+
 - Byte 0: Distance minus 1 (0x00 represents distance 1, 0xFF represents distance 256)
 
 **BCJ filters**: No additional properties (offset is always 0)
@@ -148,22 +152,26 @@ The blocks section contains any number of compressed blocks followed by an end m
 ### 4.1 Block Format
 
 Each block consists of:
+
 - **Size** (4 bytes): Compressed size of the block data in bytes, stored as little-endian uint32
 - **Data**: Compressed data stream
 
 Block properties:
+
 - Minimum size: 1 B         (size field value 0x00000001)
 - Maximum size: 4 GiB - 1 B (size field value 0xFFFFFFFF)
 - Zero-length blocks are not permitted
 - Files larger than 4 GiB - 1 B MUST be split across multiple blocks
 
 **Block Independence**: Each block is completely independent:
+
 - LZMA/LZMA2 encoder state is reset for each block (fresh dictionary, reset probability models)
 - Prefilters (if used) are reset for each block with no state carried between blocks
 - BCJ filters compute jumps/calls relative to the block start, not the file start
 - No compression dictionary or filter state is shared between blocks
 
 **LZMA/LZMA2 Stream Format**:
+
 - **LZMA**: Raw LZMA stream data without end-of-stream marker (block size provides boundary)
 - **LZMA2**: Raw LZMA2 chunk stream, terminated by block boundary
 
@@ -172,21 +180,25 @@ Block properties:
 **Compression Ratio Trade-offs**:
 
 The choice of block size directly impacts compression ratio:
+
 - **Single block** (block size = file size): Maximum compression ratio, no parallelization possible
 - **Multiple blocks**: Reduced compression ratio due to dictionary reset at block boundaries, but enables parallel
   processing
 
 The compression penalty occurs because:
+
 1. Each block starts with an empty dictionary, losing context from previous data
 2. Repeated patterns across block boundaries cannot be exploited
 3. Prefilters reset their state, potentially missing optimization opportunities at boundaries
 
 **Optimal configuration**:
+
 - Block size should be ≥ dictionary size for efficient compression
 - When block size < dictionary size, the dictionary cannot be fully utilized
 - When block size >> dictionary size, diminishing returns on compression benefit
 
 **Recommended defaults**:
+
 - For maximum compression: Use a single block
 - For streaming with moderate parallelism: 16-64 MiB blocks
 - For high parallelism: 1-16 MiB blocks (accepting compression ratio penalty)
@@ -239,6 +251,7 @@ A 256-bit Blake3 hash computed over the concatenated uncompressed data of all bl
 32 bytes of Reed-Solomon parity data protecting the Blake3 hash.
 
 Parameters:
+
 - Field: GF(2^8)
 - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
 - Code: (n=64, k=32, t=16)
@@ -291,7 +304,7 @@ To append data to an existing archive:
 
 ### 6.4 Recovery Philosophy
 
-**The format explicitly chooses complete verification over partial recovery**. 
+**The format explicitly chooses complete verification over partial recovery**.
 These goals are fundamentally incompatible:
 
 - **Hash verification** requires all data to be intact
@@ -317,6 +330,7 @@ The format provides multiple validation layers:
 ### 8.1 Fatal Errors
 
 Decoders MUST abort on:
+
 - Invalid magic bytes
 - Unsupported version
 - Invalid configuration values
@@ -324,6 +338,7 @@ Decoders MUST abort on:
 ### 8.2 Integrity Errors
 
 Decoders MUST report integrity failures for:
+
 - LZMA/LZMA2 stream corruption
 - Blake3 hash mismatch (after Reed-Solomon correction attempt)
 - Reed-Solomon decode failure (uncorrectable errors)
@@ -331,6 +346,7 @@ Decoders MUST report integrity failures for:
 ### 8.3 Recovery Limitations
 
 **The format explicitly does not support partial recovery after corruption**. This is a deliberate design choice:
+
 - Integrity verification requires the complete data to compute the Blake3 hash
 - Partial recovery would produce data that cannot be verified against the stored hash
 - Block boundaries after corruption are generally unrecoverable due to the lack of synchronization markers
@@ -364,6 +380,7 @@ external error recovery systems (e.g., PAR2) or redundant storage.
 ### 10.1 Streaming Operation
 
 The format supports full streaming operation:
+
 - Compression without knowing final size
 - Decompression without seeking
 - Pipe-friendly operation
@@ -371,6 +388,7 @@ The format supports full streaming operation:
 ### 10.2 Parallel Processing
 
 For parallel decompression:
+
 1. Parse all block sizes sequentially
 2. Assign blocks to worker threads
 3. Concatenate results in order
@@ -410,6 +428,7 @@ complexity and computational overhead without meaningful benefit for integrity c
 *exceeding* CRC32 performance (~3-4 GiB/s) while providing cryptographic security.
 
 **Multiple Use Cases**:
+
 - **Content addressing**: The hash serves as a globally unique identifier for deduplication systems
 - **Out-of-band verification**: Users can transmit the hash separately for independent validation
 - **Audit trails**: Provides cryptographic proof of file contents for compliance and legal requirements
@@ -424,12 +443,14 @@ have uncorrupted files or completely corrupted files - partial correction is rar
 the "fourth factor" of integrity:
 
 **Mathematical Certainty**: Traditional formats rely on three factors:
+
 1. Decompression success
 2. Checksum match
 3. Size validation
 
 Streaming-LZMA adds a fourth: the Blake3 hash must form a valid Reed-Solomon codeword. For undetected corruption to
 occur, following fail states have to occur:
+
 1. Corruption of data
 2. Corruption of hash and Blake3 hash collision (2^-256 probability)
 3. Corrupted hash still forms a valid RS codeword (2^-128 probability)
@@ -461,6 +482,7 @@ build external indices.
 ### 11.6 Summary
 
 The Streaming-LZMA format makes deliberate trade-offs, prioritizing:
+
 - **Streaming operation** over random access
 - **Mathematical integrity guarantees** over minimal complexity
 - **Predictable behavior** over maximum flexibility
@@ -501,7 +523,7 @@ patents. However:
 - Reed-Solomon codes have been in public use since 1960 with expired foundational patents
 - BCJ filters and Delta encoding are well-established techniques without known patent claims
 
-**This document does not constitute legal advice**. Implementers are responsible for their own patent review and risk 
+**This document does not constitute legal advice**. Implementers are responsible for their own patent review and risk
 assessment. The authors make no warranties regarding patent status and assume no liability for implementations based
 on this specification.
 
@@ -514,9 +536,28 @@ specification.
 
 ### A.1 Minimal File
 
-A valid Streaming-LZMA file containing the single byte 0x00:
+Hexdump of a minimal Streaming-LZMA file using LZMA + no prefilter and no content:
 
-!TODO!
+```
+|fedcba98 01005d06 00000000 00000000| ......]......... 00000000
+|00000000 00000000 00000000 af1349b9| ..............I. 00000010
+|f5f9a1a6 a0404dea 36dcc949 9bcb25c9| .....@M.6..I..%. 00000020
+|adc112b7 cc9a93ca e41f3262 cedfc1cc| ..........2b.... 00000030
+|789afb17 6bf1fb71 a6756a5b 315bdbc2| x...k..q.uj[1[.. 00000040
+|322f987f f3aa7b0c 7c2a6a7d         | 2/....{.|*j}     00000050
+```
+
+Hexdump of a minimal Streaming LZMA file using LZMA2 + no prefilter and single zero byte content:
+
+```
+|fedcba98 01010805 00000001 00000000| ................ 00000000
+|00000000 01000000 00000000 05000000| ................ 00000010
+|00000000 2d3adedf f11b61f1 4c886e35| ....-:....a.L.n5 00000020
+|afa03673 6dcd87a7 4d27b5c1 510225d0| ..6sm...M'..Q.%. 00000030
+|f592e213 c213b18e a038cbd9 669481d7| .........8..f... 00000040
+|382c07d1 0c82c200 97993342 3a3340c2| 8,........3B:3@. 00000050
+|48382018                           | H8 .             00000060
+```
 
 ### A.2 Reed-Solomon Implementation
 

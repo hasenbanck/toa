@@ -25,6 +25,8 @@ pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
 
+pub use writer::{Prefilter, SLZOptions, SLZWriter};
+
 /// Result type of the crate.
 #[cfg(feature = "std")]
 pub type Result<T> = core::result::Result<T, Error>;
@@ -50,21 +52,13 @@ fn set_error(
 trait ByteReader {
     fn read_u8(&mut self) -> Result<u8>;
 
-    fn read_u16(&mut self) -> Result<u16>;
-
-    fn read_u16_be(&mut self) -> Result<u16>;
-
     fn read_u32(&mut self) -> Result<u32>;
-
-    fn read_u32_be(&mut self) -> Result<u32>;
 
     fn read_u64(&mut self) -> Result<u64>;
 }
 
 trait ByteWriter {
     fn write_u8(&mut self, value: u8) -> Result<()>;
-
-    fn write_u16(&mut self, value: u16) -> Result<()>;
 
     fn write_u32(&mut self, value: u32) -> Result<()>;
 
@@ -80,31 +74,10 @@ impl<T: Read> ByteReader for T {
     }
 
     #[inline(always)]
-    fn read_u16(&mut self) -> Result<u16> {
-        let mut buf = [0; 2];
-        self.read_exact(buf.as_mut())?;
-        Ok(u16::from_le_bytes(buf))
-    }
-
-    #[inline(always)]
-    fn read_u16_be(&mut self) -> Result<u16> {
-        let mut buf = [0; 2];
-        self.read_exact(buf.as_mut())?;
-        Ok(u16::from_be_bytes(buf))
-    }
-
-    #[inline(always)]
     fn read_u32(&mut self) -> Result<u32> {
         let mut buf = [0; 4];
         self.read_exact(buf.as_mut())?;
         Ok(u32::from_le_bytes(buf))
-    }
-
-    #[inline(always)]
-    fn read_u32_be(&mut self) -> Result<u32> {
-        let mut buf = [0; 4];
-        self.read_exact(buf.as_mut())?;
-        Ok(u32::from_be_bytes(buf))
     }
 
     #[inline(always)]
@@ -119,11 +92,6 @@ impl<T: Write> ByteWriter for T {
     #[inline(always)]
     fn write_u8(&mut self, value: u8) -> Result<()> {
         self.write_all(&[value])
-    }
-
-    #[inline(always)]
-    fn write_u16(&mut self, value: u16) -> Result<()> {
-        self.write_all(&value.to_le_bytes())
     }
 
     #[inline(always)]
@@ -219,71 +187,4 @@ fn error_unsupported(msg: &'static str) -> Error {
 #[inline(always)]
 fn copy_error(error: &Error) -> Error {
     *error
-}
-
-// Re-export writer types
-pub use writer::{CompressionAlgorithm, Prefilter, SLZOptions, SLZWriter};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn test_slz_writer_basic() {
-        let mut buffer = Vec::new();
-        let options = SLZOptions::default();
-
-        let mut writer = SLZWriter::new(Cursor::new(&mut buffer), options).unwrap();
-
-        let test_data =
-            b"Hello, SLZ compression world! This is a test of the Streaming LZMA format.";
-        writer.write_all(test_data).unwrap();
-
-        let _inner = writer.finish().unwrap();
-
-        // Check that some data was written (header + compressed data + trailer)
-        assert!(
-            buffer.len() > test_data.len() / 2,
-            "Buffer should contain compressed data"
-        );
-
-        // Check magic bytes
-        assert_eq!(&buffer[0..4], &[0xFE, 0xDC, 0xBA, 0x98]);
-
-        // Check version
-        assert_eq!(buffer[4], 0x01);
-    }
-
-    #[test]
-    fn test_slz_writer_with_block_size() {
-        use core::num::NonZeroU64;
-
-        let mut buffer = Vec::new();
-        let mut options = SLZOptions::default();
-        options.set_block_size(Some(NonZeroU64::new(1024).unwrap()));
-
-        let mut writer = SLZWriter::new(Cursor::new(&mut buffer), options).unwrap();
-
-        // Write more data than block size to test multi-block handling
-        let test_data = vec![b'A'; 2048];
-        writer.write_all(&test_data).unwrap();
-
-        let _inner = writer.finish().unwrap();
-
-        // Check that data was written
-        assert!(buffer.len() > 0);
-
-        // Check magic bytes
-        assert_eq!(&buffer[0..4], &[0xFE, 0xDC, 0xBA, 0x98]);
-    }
-
-    #[test]
-    fn test_slz_options_presets() {
-        for preset in 0..10 {
-            let options = SLZOptions::with_preset(preset);
-            assert!(options.dict_size_log2 >= 12);
-            assert!(options.dict_size_log2 <= 32);
-        }
-    }
 }
