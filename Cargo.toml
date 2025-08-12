@@ -13,9 +13,10 @@ rust-version = "1.89"
 [[bin]]
 name = "slz"
 path = "src/bin/slz.rs"
+required-features = ["std"]
 
 [dependencies]
-lzma-rust2 = { version = "0.8", default-features = false, features = ["std", "optimization", "encoder"] }
+lzma-rust2 = { version = "0.8", default-features = false, features = ["optimization", "encoder"] }
 blake3 = { version = "1.8", default-features = false, features = ["std", "no_avx512"] }
 
 [dev-dependencies]
@@ -24,4 +25,4 @@ hexdump = "0.1"
 
 [features]
 default = ["std"]
-std = []
+std = ["lzma-rust2/std"]

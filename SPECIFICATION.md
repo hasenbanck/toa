@@ -28,7 +28,7 @@ guards against both random and systematic errors.
 incremental backups and log aggregation use cases.
 
 **Simplicity**: The format uses fixed-size fields where practical and avoids unnecessary complexity. All multibyte
-integers use little-endian encoding. No alignment padding is required.
+integers use little-endian encoding. No alignment padding is required. Only LZMA compression is supported.
 
 ### 1.3 Conventions
 
@@ -43,7 +43,7 @@ A Streaming-LZMA file consists of three sections:
 
 ```
 +==================+
-|      Header      |  (Variable: 6-10 bytes)
+|      Header      |  (Variable: 6-9 bytes)
 +==================+
 |      Blocks      |  (Variable: 1 or more blocks)
 +==================+
@@ -59,9 +59,9 @@ The header contains format identification and compression configuration:
 +------+------+------+------+
 | 0xFE | 0xDC | 0xBA | 0x98 |  Magic bytes (4 bytes)
 +------+------+------+------+
-|    Version   |   Config   |  Version and configuration (2 bytes)
+|    Version   | Prefilter  |  Version and prefilter (2 bytes)
 +------+------+------+------+
-|  Compression Properties   |  (1-2 bytes, algorithm-specific)
+|   LZMA Properties         |  (2 bytes)
 +---------------------------+
 |   Prefilter Properties    |  (0-1 bytes, filter-specific)
 +---------------------------+
@@ -83,45 +83,43 @@ One byte indicating the format version. This specification defines version 0x01.
 
 Decoders MUST reject files with unsupported version numbers.
 
-### 3.3 Configuration
+### 3.3 Prefilter Selection
 
-One byte containing compression algorithm and prefilter selection:
+One byte indicating the optional prefilter:
 
-- Bits 0-2: Compression algorithm
-    - 0x00: LZMA
-    - 0x01: LZMA2
-    - 0x02-0x07: Reserved
+- 0x00: No prefilter
+- 0x01: Delta
+- 0x02: BCJ x86
+- 0x03: BCJ ARM
+- 0x04: BCJ ARM Thumb
+- 0x05: BCJ ARM64
+- 0x06: BCJ SPARC
+- 0x07: BCJ PowerPC
+- 0x08: BCJ IA64
+- 0x09: BCJ RISC-V
+- 0x0A-0xFF: Reserved
 
-- Bits 3-7: Prefilter
-    - 0x00: No prefilter
-    - 0x01: Delta
-    - 0x02: BCJ x86
-    - 0x03: BCJ ARM
-    - 0x04: BCJ ARM Thumb
-    - 0x05: BCJ ARM64
-    - 0x06: BCJ SPARC
-    - 0x07: BCJ PowerPC
-    - 0x08: BCJ IA64
-    - 0x09: BCJ RISC-V
-    - 0x0A-0x1F: Reserved
+The prefilter are the same as used by LZMA SDK and liblzma.
 
-### 3.4 Compression Properties
+### 3.4 LZMA Properties
 
-Algorithm-specific compression parameters:
+Two bytes encoding LZMA compression parameters:
 
-**LZMA** (2 bytes):
-
-- Byte 0: Properties byte encoding (pb * 5 + lp) * 9 + lc
+- **Byte 0**: Properties byte encoding (pb * 5 + lp) * 9 + lc
     - lc: number of literal context bits (0-8)
     - lp: number of literal position bits (0-4)
     - pb: number of position bits (0-4)
-- Byte 1: Dictionary size as power of 2 (size = 2^(n+12))
+- **Byte 1**: Dictionary size as power of 2 (size = 2^(n+16))
 
-**LZMA2** (1 byte):
+Valid dictionary sizes range from 64 KiB (n=0) to 4 GiB (n=16).
 
-- Byte 0: Dictionary size as power of 2 (size = 2^(n+12))
+**Note on LZMA parameters**: While the default LZMA parameters (lc=3, lp=0, pb=2) work well for most data,
+BCJ filters benefit from adjusted parameters. For example:
 
-Valid dictionary sizes range from 4 KiB (n=0) to 4 GiB (n=20).
+- ARM64 executable: lc=2,lp=2,pb=2
+- RISC-V executable: lc=2,lp=2,pb=2
+- RISC-V executable with compressed instructions: lc=3,lp=1,pb=2
+- x86 executables: lc=3,lp=0,pb=2 (default)
 
 ### 3.5 Prefilter Properties
 
@@ -154,26 +152,23 @@ The blocks section contains any number of compressed blocks followed by an end m
 Each block consists of:
 
 - **Size** (4 bytes): Compressed size of the block data in bytes, stored as little-endian uint32
-- **Data**: Compressed data stream
+- **Data**: LZMA compressed data stream
 
 Block properties:
 
-- Minimum size: 1 B         (size field value 0x00000001)
-- Maximum size: 4 GiB - 1 B (size field value 0xFFFFFFFF)
+- Minimum size: 1 B    (size field value 0x00000001)
+- Maximum size: (4 GiB - 1 B) (size field value 0xFFFFFFFF)
 - Zero-length blocks are not permitted
-- Files larger than 4 GiB - 1 B MUST be split across multiple blocks
+- Files larger than (4 GiB - 1 B) MUST be split across multiple blocks
 
 **Block Independence**: Each block is completely independent:
 
-- LZMA/LZMA2 encoder state is reset for each block (fresh dictionary, reset probability models)
+- LZMA encoder state is reset for each block (fresh dictionary, reset probability models)
 - Prefilters (if used) are reset for each block with no state carried between blocks
 - BCJ filters compute jumps/calls relative to the block start, not the file start
 - No compression dictionary or filter state is shared between blocks
 
-**LZMA/LZMA2 Stream Format**:
-
-- **LZMA**: Raw LZMA stream data without end-of-stream marker (block size provides boundary)
-- **LZMA2**: Raw LZMA2 chunk stream, terminated by block boundary
+**LZMA Stream Format**: Raw LZMA stream data without end-of-stream marker (block size provides boundary)
 
 ### 4.2 Block Size Recommendations
 
@@ -196,12 +191,6 @@ The compression penalty occurs because:
 - Block size should be ≥ dictionary size for efficient compression
 - When block size < dictionary size, the dictionary cannot be fully utilized
 - When block size >> dictionary size, diminishing returns on compression benefit
-
-**Recommended defaults**:
-
-- For maximum compression: Use a single block
-- For streaming with moderate parallelism: 16-64 MiB blocks
-- For high parallelism: 1-16 MiB blocks (accepting compression ratio penalty)
 
 **Memory usage considerations**:
 Parallel decompression requires approximately (dict_size + block_size) × thread_count memory. For example,
@@ -272,7 +261,7 @@ are thoroughly understood and battle-tested implementations are available.
 
 1. Write header with appropriate configuration
 2. For each block of input data:
-    - Compress the block
+    - Compress the block with LZMA
     - Write 4-byte size (little-endian)
     - Write compressed data
 3. Write end-of-blocks marker (0x00000000)
@@ -284,11 +273,11 @@ are thoroughly understood and battle-tested implementations are available.
 
 1. Verify magic bytes
 2. Verify version compatibility
-3. Parse compression and filter configuration
+3. Parse LZMA and filter configuration
 4. For each block until end-of-blocks marker:
     - Read 4-byte size
     - If size is 0x00000000, end block processing
-    - Decompress block data
+    - Decompress block data with LZMA
     - Append to output
 5. Compute Blake3 hash of decompressed data
 6. Verify hash against trailer (optionally using Reed-Solomon correction)
@@ -320,7 +309,7 @@ partially corrupted results.
 
 The format provides multiple validation layers:
 
-1. **Block Level**: LZMA/LZMA2 stream integrity checking detects most corruption within compressed data
+1. **Block Level**: LZMA stream integrity checking detects most corruption within compressed data
 2. **Format Level**: End-of-blocks marker validates structural integrity
 3. **Content Level**: Blake3 hash verifies complete data integrity
 4. **Trailer Level**: Reed-Solomon codes protect against hash corruption and provide strong end-of-file validation
@@ -339,7 +328,7 @@ Decoders MUST abort on:
 
 Decoders MUST report integrity failures for:
 
-- LZMA/LZMA2 stream corruption
+- LZMA stream corruption
 - Blake3 hash mismatch (after Reed-Solomon correction attempt)
 - Reed-Solomon decode failure (uncorrectable errors)
 
@@ -417,7 +406,30 @@ mechanisms:
 The trailer design was chosen to maintain pure streaming capability - writers can begin compression without knowing the
 final size, and readers can begin decompression immediately upon receiving data.
 
-### 11.2 Cryptographic Hash "Overkill"
+### 11.2 LZMA vs LZMA2 Decision
+
+**Criticism**: Why use LZMA instead of its successor LZMA2, which adds features like uncompressed chunks and better
+streaming support?
+
+**Response**: Empirical testing revealed that LZMA consistently outperforms LZMA2 in our format:
+
+**Compression Efficiency**: Across diverse test data (Linux kernel sources, executables, JPEG images), LZMA produced
+consistently smaller output than LZMA2. The overhead from LZMA2's chunk headers and control bytes negates its
+theoretical advantages.
+
+**Simplicity Benefit**: LZMA's simpler structure reduces implementation complexity without sacrificing functionality.
+The primary LZMA2 advantage - switching between compressed and uncompressed chunks - provides minimal benefit when
+the entire block structure already provides natural boundaries.
+
+**Memory Trade-offs**: While LZMA2's chunking can reduce memory usage during compression, our block-based design
+already provides memory-bounded operation. The encoder only needs to buffer one block at a time if streaming is needed,
+or don't need to buffer at all if seeking is possible (for example when writing into files), making LZMA2's fine-grained
+chunking redundant.
+
+This decision validates the approach taken by the LZIP format, which similarly chose LZMA over LZMA2 for comparable
+reasons.
+
+### 11.3 Cryptographic Hash "Overkill"
 
 **Criticism**: CRC32 is sufficient for error detection in compressed formats. Cryptographic hashes add unnecessary
 complexity and computational overhead without meaningful benefit for integrity checking.
@@ -434,7 +446,7 @@ complexity and computational overhead without meaningful benefit for integrity c
 - **Audit trails**: Provides cryptographic proof of file contents for compliance and legal requirements
 - **Tamper detection**: Detects intentional manipulation, not just accidental corruption
 
-### 11.3 Reed-Solomon Complexity
+### 11.4 Reed-Solomon Complexity
 
 **Criticism**: Error correction codes add implementation complexity for minimal practical benefit. Most users either
 have uncorrupted files or completely corrupted files - partial correction is rarely useful.
@@ -464,7 +476,7 @@ file, not random data or a different format. This is particularly valuable for r
 against the vulnerability this creates. The 16-byte correction capability can recover from common data corruption
 patterns.
 
-### 11.4 Lack of Random Access
+### 11.5 Lack of Random Access
 
 **Criticism**: The format doesn't support efficient random access to arbitrary positions in the uncompressed data,
 limiting its utility for large archives.
@@ -487,18 +499,21 @@ The Streaming-LZMA format makes deliberate trade-offs, prioritizing:
 - **Mathematical integrity guarantees** over minimal complexity
 - **Predictable behavior** over maximum flexibility
 - **Future-proof security** over minimal overhead
+- **Proven simplicity** over theoretical features
 
 These choices result in a format that may not be optimal for every use case but excels at its intended purpose:
 reliable, streaming compression with exceptional integrity assurance. The combination of Blake3 hashing with
 Reed-Solomon protection provides a level of corruption detection and recovery that exceeds both simpler formats
 (like LZIP) and more complex ones (like XZ), while maintaining reasonable implementation complexity.
 
+The decision to use LZMA over LZMA2 exemplifies our philosophy: choose the simpler solution when the complex one
+offers no practical advantage.
+
 ## 12. Acknowledgements
 
 The Streaming-LZMA format builds upon decades of compression research and development. We acknowledge:
 
-- **Igor Pavlov** for creating the LZMA algorithm and LZMA2 format, which form the compression foundation of this
-  specification
+- **Igor Pavlov** for creating the LZMA algorithm, which forms the compression foundation of this specification
 - **Jack O'Connor, Samuel Neves, Jean-Philippe Aumasson, and Zooko** for developing the Blake3 hash function
 - **Irving S. Reed and Gustave Solomon** for their pioneering work on error correction codes
 - **The XZ Utils project** (Lasse Collin and contributors) for advancing LZMA-based compression formats
@@ -517,8 +532,7 @@ specification without restriction.
 To the best of the authors' knowledge, the Streaming-LZMA format as specified in this document is not encumbered by
 patents. However:
 
-- LZMA and LZMA2 algorithms are believed to be patent-free and have been widely implemented without patent claims for
-  over 20 years
+- LZMA algorithm is believed to be patent-free and has been widely implemented without patent claims for over 20 years
 - Blake3 is explicitly released under CC0 (public domain) with no known patent encumbrances
 - Reed-Solomon codes have been in public use since 1960 with expired foundational patents
 - BCJ filters and Delta encoding are well-established techniques without known patent claims
@@ -549,7 +563,7 @@ Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 3) + no pre
 
 ### A.2 Reed-Solomon Implementation
 
-The reference implementation provides a stack only and efficient Reed-Solomon implementation in Rust.
+The reference implementation provides a stack-only and efficient Reed-Solomon implementation in Rust.
 
 ## Appendix B: Reference Implementation
 
@@ -561,4 +575,4 @@ Files using this format SHOULD use the extension `.slz`.
 
 ## Revision History
 
-- Version 1.0 (2025-08-11): Initial specification
+- Version 0.1 (2025-08-12): Initial specification

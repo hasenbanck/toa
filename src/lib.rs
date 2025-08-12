@@ -3,8 +3,6 @@
 
 extern crate alloc;
 
-#[cfg(not(feature = "std"))]
-mod no_std;
 mod reader;
 pub mod reed_solomon;
 #[cfg(feature = "std")]
@@ -19,11 +17,11 @@ pub(crate) use std::io::Read;
 pub(crate) use std::io::Write;
 
 #[cfg(not(feature = "std"))]
-pub use no_std::Error;
+pub use lzma_rust2::Error;
 #[cfg(not(feature = "std"))]
-pub use no_std::Read;
+pub use lzma_rust2::Read;
 #[cfg(not(feature = "std"))]
-pub use no_std::Write;
+pub use lzma_rust2::Write;
 pub use writer::{Prefilter, SLZOptions, SLZWriter};
 
 /// Result type of the crate.

@@ -1,8 +1,10 @@
 //! Implementation of the single-threaded encoder.
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use core::cell::{Cell, RefCell};
-use std::num::NonZeroU32;
+use core::{
+    cell::{Cell, RefCell},
+    num::NonZeroU32,
+};
 
 use lzma_rust2::{
     LZMAOptions, LZMAWriter,
@@ -451,6 +453,7 @@ impl<W: Write> Write for SLZWriter<W> {
     }
 }
 
+#[cfg(feature = "std")]
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
