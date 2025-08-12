@@ -6,85 +6,167 @@ use std::{
     time::Instant,
 };
 
-use clap::Parser;
+use clap::{Arg, ArgMatches, Command, value_parser};
 use slz::{Prefilter, SLZOptions, SLZStreamingWriter};
 
-#[derive(Parser)]
-#[command(name = "slz")]
-#[command(about = "Compress files using the SLZ (Streaming LZMA) format")]
-#[command(version)]
 struct Cli {
-    /// Input file to compress
-    #[arg(value_name = "FILE")]
     input: String,
-
-    /// Output file path (defaults to input + .slz extension)
-    #[arg(short, long, value_name = "FILE")]
     output: Option<String>,
-
-    /// Compression preset level (0-9, higher is better compression)
-    #[arg(short, long, value_parser = clap::value_parser!(u32).range(0..=9), default_value_t = 6)]
     preset: u32,
-
-    /// Block size in bytes
-    #[arg(long, value_name = "bytes", value_parser = clap::value_parser!(u32).range(1..=4294967295))]
     block_size: Option<u32>,
-
-    // Prefilter options (XZ-style)
-    /// Use x86 BCJ filter
-    #[arg(long)]
     x86: bool,
-
-    /// Use ARM BCJ filter
-    #[arg(long)]
     arm: bool,
-
-    /// Use ARM Thumb BCJ filter
-    #[arg(long)]
     armthumb: bool,
-
-    /// Use ARM64 BCJ filter
-    #[arg(long)]
     arm64: bool,
-
-    /// Use SPARC BCJ filter
-    #[arg(long)]
     sparc: bool,
-
-    /// Use PowerPC BCJ filter
-    #[arg(long)]
     powerpc: bool,
-
-    /// Use IA-64 BCJ filter
-    #[arg(long)]
     ia64: bool,
-
-    /// Use RISC-V BCJ filter
-    #[arg(long)]
     riscv: bool,
-
-    /// Use Delta filter with specified distance (1-256)
-    #[arg(long, value_name = "distance")]
     delta: Option<u16>,
-
-    /// LZMA literal context bits (0-8)
-    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=8))]
     lc: Option<u8>,
-
-    /// LZMA literal position bits (0-4)
-    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=4))]
     lp: Option<u8>,
-
-    /// LZMA position bits (0-4)
-    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=4))]
     pb: Option<u8>,
-
-    /// Dictionary size as power of 2 (16-32, e.g., 26 = 64MiB)
-    #[arg(long, value_parser = clap::value_parser!(u8).range(16..=32), value_name = "N")]
     dict_size: Option<u8>,
 }
 
 impl Cli {
+    fn build_command() -> Command {
+        Command::new("slz")
+            .about("Compress files using the SLZ (Streaming LZMA) format")
+            .version(env!("CARGO_PKG_VERSION"))
+            .arg(
+                Arg::new("input")
+                    .help("Input file to compress")
+                    .value_name("FILE")
+                    .required(true)
+                    .index(1),
+            )
+            .arg(
+                Arg::new("output")
+                    .help("Output file path (defaults to input + .slz extension)")
+                    .short('o')
+                    .long("output")
+                    .value_name("FILE"),
+            )
+            .arg(
+                Arg::new("preset")
+                    .help("Compression preset level (0-9, higher is better compression)")
+                    .short('p')
+                    .long("preset")
+                    .value_parser(value_parser!(u32).range(0..=9))
+                    .default_value("6"),
+            )
+            .arg(
+                Arg::new("block-size")
+                    .help("Block size in bytes")
+                    .long("block-size")
+                    .value_name("bytes")
+                    .value_parser(value_parser!(u32).range(1..=4294967295)),
+            )
+            .arg(
+                Arg::new("x86")
+                    .help("Use x86 BCJ filter")
+                    .long("x86")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("arm")
+                    .help("Use ARM BCJ filter")
+                    .long("arm")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("armthumb")
+                    .help("Use ARM Thumb BCJ filter")
+                    .long("armthumb")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("arm64")
+                    .help("Use ARM64 BCJ filter")
+                    .long("arm64")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("sparc")
+                    .help("Use SPARC BCJ filter")
+                    .long("sparc")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("powerpc")
+                    .help("Use PowerPC BCJ filter")
+                    .long("powerpc")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("ia64")
+                    .help("Use IA-64 BCJ filter")
+                    .long("ia64")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("riscv")
+                    .help("Use RISC-V BCJ filter")
+                    .long("riscv")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("delta")
+                    .help("Use Delta filter with specified distance (1-256)")
+                    .long("delta")
+                    .value_name("distance")
+                    .value_parser(value_parser!(u16)),
+            )
+            .arg(
+                Arg::new("lc")
+                    .help("LZMA literal context bits (0-8)")
+                    .long("lc")
+                    .value_parser(value_parser!(u8).range(0..=8)),
+            )
+            .arg(
+                Arg::new("lp")
+                    .help("LZMA literal position bits (0-4)")
+                    .long("lp")
+                    .value_parser(value_parser!(u8).range(0..=4)),
+            )
+            .arg(
+                Arg::new("pb")
+                    .help("LZMA position bits (0-4)")
+                    .long("pb")
+                    .value_parser(value_parser!(u8).range(0..=4)),
+            )
+            .arg(
+                Arg::new("dict-size")
+                    .help("Dictionary size as power of 2 (16-32, e.g., 26 = 64MiB)")
+                    .long("dict-size")
+                    .value_name("N")
+                    .value_parser(value_parser!(u8).range(16..=32)),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Self {
+        Self {
+            input: matches.get_one::<String>("input").unwrap().clone(),
+            output: matches.get_one::<String>("output").cloned(),
+            preset: *matches.get_one::<u32>("preset").unwrap(),
+            block_size: matches.get_one::<u32>("block-size").copied(),
+            x86: matches.get_flag("x86"),
+            arm: matches.get_flag("arm"),
+            armthumb: matches.get_flag("armthumb"),
+            arm64: matches.get_flag("arm64"),
+            sparc: matches.get_flag("sparc"),
+            powerpc: matches.get_flag("powerpc"),
+            ia64: matches.get_flag("ia64"),
+            riscv: matches.get_flag("riscv"),
+            delta: matches.get_one::<u16>("delta").copied(),
+            lc: matches.get_one::<u8>("lc").copied(),
+            lp: matches.get_one::<u8>("lp").copied(),
+            pb: matches.get_one::<u8>("pb").copied(),
+            dict_size: matches.get_one::<u8>("dict-size").copied(),
+        }
+    }
+
     fn get_prefilter(&self) -> Result<Prefilter> {
         let mut filters = Vec::new();
 
@@ -143,7 +225,8 @@ impl Cli {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let matches = Cli::build_command().get_matches();
+    let cli = Cli::from_matches(&matches);
 
     let output_filename = cli
         .output
