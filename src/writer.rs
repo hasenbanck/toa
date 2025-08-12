@@ -1,17 +1,14 @@
 //! Implementation of the single-threaded encoder.
 
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use core::{
-    cell::{Cell, RefCell},
-    num::NonZeroU32,
-};
+use alloc::vec::Vec;
+use core::num::NonZeroU32;
 
 use lzma_rust2::{
     LZMAOptions, LZMAWriter,
     filter::{bcj::BCJWriter, delta::DeltaWriter},
 };
 
-use crate::{ByteWriter, Result, Write, error_invalid_data, reed_solomon::encode};
+use crate::{ByteWriter, Result, Write, error_invalid_data, error_other, reed_solomon::encode};
 
 const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
 
@@ -172,63 +169,138 @@ impl SLZOptions {
     }
 }
 
-trait FinishableWriter: Write {
-    fn finish(self: Box<Self>) -> Result<()>;
+/// Represents the compression writer chain.
+#[allow(clippy::large_enum_variant)]
+enum WriterChain {
+    Lzma(LZMAWriter<Vec<u8>>),
+    Delta(DeltaWriter<LZMAWriter<Vec<u8>>>),
+    BcjX86(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjArm(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjArmThumb(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjArm64(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjSparc(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjPowerPc(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjIa64(BCJWriter<LZMAWriter<Vec<u8>>>),
+    BcjRiscV(BCJWriter<LZMAWriter<Vec<u8>>>),
 }
 
-impl<W: Write> FinishableWriter for LZMAWriter<W> {
-    fn finish(self: Box<Self>) -> Result<()> {
-        (*self).finish()?;
-        Ok(())
+impl Write for WriterChain {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        match self {
+            WriterChain::Lzma(writer) => writer.write(buf),
+            WriterChain::Delta(writer) => writer.write(buf),
+            WriterChain::BcjX86(writer) => writer.write(buf),
+            WriterChain::BcjArm(writer) => writer.write(buf),
+            WriterChain::BcjArmThumb(writer) => writer.write(buf),
+            WriterChain::BcjArm64(writer) => writer.write(buf),
+            WriterChain::BcjSparc(writer) => writer.write(buf),
+            WriterChain::BcjPowerPc(writer) => writer.write(buf),
+            WriterChain::BcjIa64(writer) => writer.write(buf),
+            WriterChain::BcjRiscV(writer) => writer.write(buf),
+        }
     }
-}
 
-impl<W: FinishableWriter> FinishableWriter for DeltaWriter<W> {
-    fn finish(self: Box<Self>) -> Result<()> {
-        let inner = (*self).into_inner();
-        Box::new(inner).finish()
-    }
-}
-
-impl<W: FinishableWriter> FinishableWriter for BCJWriter<W> {
-    fn finish(self: Box<Self>) -> Result<()> {
-        let inner = (*self).into_inner();
-        Box::new(inner).finish()
-    }
-}
-
-impl<'writer> FinishableWriter for Box<dyn FinishableWriter + 'writer> {
-    fn finish(self: Box<Self>) -> Result<()> {
-        (*self).finish()
-    }
-}
-
-struct SharedWriter<W> {
-    inner: Rc<RefCell<W>>,
-    bytes_written: Rc<Cell<u64>>,
-}
-
-impl<W> SharedWriter<W> {
-    fn new(inner: W, bytes_written: Rc<Cell<u64>>) -> Self {
-        Self {
-            inner: Rc::new(RefCell::new(inner)),
-            bytes_written,
+    fn flush(&mut self) -> Result<()> {
+        match self {
+            WriterChain::Lzma(writer) => writer.flush(),
+            WriterChain::Delta(writer) => writer.flush(),
+            WriterChain::BcjX86(writer) => writer.flush(),
+            WriterChain::BcjArm(writer) => writer.flush(),
+            WriterChain::BcjArmThumb(writer) => writer.flush(),
+            WriterChain::BcjArm64(writer) => writer.flush(),
+            WriterChain::BcjSparc(writer) => writer.flush(),
+            WriterChain::BcjPowerPc(writer) => writer.flush(),
+            WriterChain::BcjIa64(writer) => writer.flush(),
+            WriterChain::BcjRiscV(writer) => writer.flush(),
         }
     }
 }
 
-impl<W: Write> Write for SharedWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        let mut writer = self.inner.borrow_mut();
-        let bytes_written = writer.write(buf)?;
-        self.bytes_written
-            .set(self.bytes_written.get() + bytes_written as u64);
-        Ok(bytes_written)
+impl WriterChain {
+    /// Finish the writer chain and extract the compressed data
+    fn finish(self) -> Result<Vec<u8>> {
+        match self {
+            WriterChain::Lzma(writer) => {
+                let buffer = writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::Delta(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjX86(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjArm(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjArmThumb(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjArm64(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjSparc(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjPowerPc(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjIa64(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+            WriterChain::BcjRiscV(writer) => {
+                let lzma_writer = writer.into_inner();
+                let buffer = lzma_writer.finish()?;
+                Ok(buffer)
+            }
+        }
     }
 
-    fn flush(&mut self) -> Result<()> {
-        let mut writer = self.inner.borrow_mut();
-        writer.flush()
+    /// Create a new writer chain based on the options
+    fn new(options: &SLZOptions) -> Result<Self> {
+        let lzma_writer = LZMAWriter::new_no_header(
+            Vec::new(),
+            &LZMAOptions {
+                dict_size: options.dict_size().min(lzma_rust2::DICT_SIZE_MAX),
+                lc: u32::from(options.lc),
+                lp: u32::from(options.lp),
+                pb: u32::from(options.pb),
+                ..Default::default()
+            },
+            false,
+        )?;
+
+        #[rustfmt::skip]
+        let chain = match options.prefilter {
+            Prefilter::None => WriterChain::Lzma(lzma_writer),
+            Prefilter::Delta { distance } => WriterChain::Delta(DeltaWriter::new(lzma_writer, distance as usize)),
+            Prefilter::BcjX86 => WriterChain::BcjX86(BCJWriter::new_x86(lzma_writer, 0)),
+            Prefilter::BcjArm => WriterChain::BcjArm(BCJWriter::new_arm(lzma_writer, 0)),
+            Prefilter::BcjArmThumb => WriterChain::BcjArmThumb(BCJWriter::new_arm_thumb(lzma_writer, 0)),
+            Prefilter::BcjArm64 => WriterChain::BcjArm64(BCJWriter::new_arm64(lzma_writer, 0)),
+            Prefilter::BcjSparc => WriterChain::BcjSparc(BCJWriter::new_sparc(lzma_writer, 0)),
+            Prefilter::BcjPowerPc => WriterChain::BcjPowerPc(BCJWriter::new_ppc(lzma_writer, 0)),
+            Prefilter::BcjIa64 => WriterChain::BcjIa64(BCJWriter::new_ia64(lzma_writer, 0)),
+            Prefilter::BcjRiscV => WriterChain::BcjRiscV(BCJWriter::new_riscv(lzma_writer, 0)),
+        };
+
+        Ok(chain)
     }
 }
 
@@ -239,8 +311,9 @@ pub struct SLZWriter<W> {
     header_written: bool,
     hasher: blake3::Hasher,
     uncompressed_size: u64,
-    compressed_size: Rc<Cell<u64>>,
-    current_block_data: Vec<u8>,
+    compressed_size: u64,
+    current_writer_chain: Option<WriterChain>,
+    compressed_blocks: Vec<Vec<u8>>,
 }
 
 impl<W: Write> SLZWriter<W> {
@@ -252,8 +325,9 @@ impl<W: Write> SLZWriter<W> {
             header_written: false,
             hasher: blake3::Hasher::new(),
             uncompressed_size: 0,
-            compressed_size: Rc::new(Cell::new(0)),
-            current_block_data: Vec::new(),
+            compressed_size: 0,
+            current_writer_chain: None,
+            compressed_blocks: Vec::new(),
         }
     }
 
@@ -292,60 +366,37 @@ impl<W: Write> SLZWriter<W> {
         Ok(())
     }
 
-    /// Compress and write a block of data with size prepended.
-    fn compress_and_write_block(&mut self) -> Result<()> {
-        if self.current_block_data.is_empty() {
-            return Ok(());
-        }
+    /// Initialize a new writer chain for a new block.
+    fn start_new_block(&mut self) -> Result<()> {
+        self.current_writer_chain = Some(WriterChain::new(&self.options)?);
+        Ok(())
+    }
 
-        // Create a buffer to collect compressed data.
-        let mut compressed_data = Vec::new();
-
-        // Set up compression chain.
-        let mut writer: Box<dyn FinishableWriter> = Box::new(LZMAWriter::new_no_header(
-            SharedWriter::new(&mut compressed_data, Rc::clone(&self.compressed_size)),
-            &LZMAOptions {
-                dict_size: self.options.dict_size(),
-                lc: u32::from(self.options.lc),
-                lp: u32::from(self.options.lp),
-                pb: u32::from(self.options.pb),
-                ..Default::default()
-            },
-            false,
-        )?);
-
-        // Apply prefilter if configured
-        match self.options.prefilter {
-            Prefilter::None => {}
-            Prefilter::Delta { distance } => {
-                writer = Box::new(DeltaWriter::new(writer, distance as usize))
+    /// Finish the current block and add it to compressed blocks
+    fn finish_current_block(&mut self) -> Result<()> {
+        if let Some(writer_chain) = self.current_writer_chain.take() {
+            let compressed_data = writer_chain.finish()?;
+            if !compressed_data.is_empty() {
+                if compressed_data.len() > u32::MAX as usize {
+                    return Err(error_invalid_data("compressed block too large"));
+                }
+                self.compressed_size += compressed_data.len() as u64;
+                self.compressed_blocks.push(compressed_data);
             }
-            Prefilter::BcjX86 => writer = Box::new(BCJWriter::new_x86(writer, 0)),
-            Prefilter::BcjArm => writer = Box::new(BCJWriter::new_arm(writer, 0)),
-            Prefilter::BcjArmThumb => writer = Box::new(BCJWriter::new_arm_thumb(writer, 0)),
-            Prefilter::BcjArm64 => writer = Box::new(BCJWriter::new_arm64(writer, 0)),
-            Prefilter::BcjSparc => writer = Box::new(BCJWriter::new_sparc(writer, 0)),
-            Prefilter::BcjPowerPc => writer = Box::new(BCJWriter::new_ppc(writer, 0)),
-            Prefilter::BcjIa64 => writer = Box::new(BCJWriter::new_ia64(writer, 0)),
-            Prefilter::BcjRiscV => writer = Box::new(BCJWriter::new_riscv(writer, 0)),
         }
+        Ok(())
+    }
 
-        // Compress the data.
-        writer.write_all(self.current_block_data.as_slice())?;
-        writer.finish()?;
-
-        let compressed_size = self.compressed_size.get();
-
-        if compressed_size > u32::MAX as u64 {
-            return Err(error_invalid_data("compressed block too large"));
-        }
-
-        // Write block size (4 bytes, little-endian).
+    /// Write all compressed blocks to the output
+    fn write_all_blocks(&mut self) -> Result<()> {
         let inner_writer = self.inner.as_mut().expect("inner writer not set");
-        inner_writer.write_u32(compressed_size as u32)?;
 
-        // Write compressed data.
-        inner_writer.write_all(&compressed_data)?;
+        for block in &self.compressed_blocks {
+            // Write block size (4 bytes, little-endian)
+            inner_writer.write_u32(block.len() as u32)?;
+            // Write compressed data
+            inner_writer.write_all(block)?;
+        }
 
         Ok(())
     }
@@ -359,7 +410,7 @@ impl<W: Write> SLZWriter<W> {
 
         // Write size fields.
         writer.write_u64(self.uncompressed_size)?;
-        writer.write_u64(self.compressed_size.get())?;
+        writer.write_u64(self.compressed_size)?;
 
         // Finalize Blake3 hash.
         let hash = self.hasher.finalize();
@@ -388,11 +439,8 @@ impl<W: Write> SLZWriter<W> {
             self.write_header()?;
         }
 
-        // Write any remaining data in the current block
-        if !self.current_block_data.is_empty() {
-            self.compress_and_write_block()?;
-        }
-
+        self.finish_current_block()?;
+        self.write_all_blocks()?;
         self.write_trailer()?;
 
         Ok(self.into_inner())
@@ -409,46 +457,57 @@ impl<W: Write> Write for SLZWriter<W> {
             self.write_header()?;
         }
 
+        if self.current_writer_chain.is_none() {
+            self.start_new_block()?;
+        }
+
         let mut total_written = 0;
         let mut remaining = buf;
 
         while !remaining.is_empty() {
-            // Calculate how much space is left in the current block
+            // Check if we need to start a new block based on uncompressed size limits.
             let block_limit = if let Some(block_size) = self.options.block_size {
-                block_size.get() as usize
+                block_size.get() as u64
             } else {
-                u32::MAX as usize // Max block size is 4 GiB - 1
+                u32::MAX as u64
             };
 
-            let space_left = block_limit.saturating_sub(self.current_block_data.len());
+            // TODO: Implement a "counting writer" to count the read uncompressed bytes.
+            // Calculate how much uncompressed data we've written to the current block.
+            let current_block_uncompressed_size =
+                self.uncompressed_size - self.compressed_blocks.iter().map(|_| 0u64).sum::<u64>();
 
-            if space_left == 0 {
-                // Current block is full, compress and write it out
-                self.compress_and_write_block()?;
-                self.current_block_data.clear();
-                continue;
+            if current_block_uncompressed_size >= block_limit {
+                // Current block is full, finish it and start a new one.
+                self.finish_current_block()?;
+                self.start_new_block()?;
             }
 
-            // Take as much data as fits in the current block
-            let to_write = remaining.len().min(space_left);
-            let chunk = &remaining[..to_write];
+            if let Some(ref mut writer_chain) = self.current_writer_chain {
+                let bytes_written = writer_chain.write(remaining)?;
 
-            // Add to block buffer and update hash
-            self.current_block_data.extend_from_slice(chunk);
-            self.hasher.update(chunk);
-            self.uncompressed_size += to_write as u64;
+                self.hasher.update(&remaining[..bytes_written]);
+                self.uncompressed_size += bytes_written as u64;
 
-            total_written += to_write;
-            remaining = &remaining[to_write..];
+                total_written += bytes_written;
+                remaining = &remaining[bytes_written..];
+            } else {
+                panic!("No active writer chain");
+            }
         }
 
         Ok(total_written)
     }
 
     fn flush(&mut self) -> Result<()> {
+        if let Some(ref mut writer_chain) = self.current_writer_chain {
+            writer_chain.flush()?;
+        }
+
         if let Some(ref mut writer) = self.inner {
             writer.flush()?;
         }
+
         Ok(())
     }
 }

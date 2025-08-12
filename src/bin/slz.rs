@@ -1,48 +1,191 @@
 use std::{
-    env,
     fs::File,
     io::{self, BufReader, BufWriter, Read, Result, Write},
+    num::NonZeroU32,
     process,
     time::Instant,
 };
 
-use slz::{SLZOptions, SLZWriter};
+use clap::Parser;
+use slz::{Prefilter, SLZOptions, SLZWriter};
 
-fn print_usage() {
-    eprintln!("Usage: slz <filename>");
-    eprintln!("Compress a file using the SLZ format.");
-    eprintln!("Output file will have the same name with .slz extension.");
+#[derive(Parser)]
+#[command(name = "slz")]
+#[command(about = "Compress files using the SLZ (Streaming LZMA) format")]
+#[command(version)]
+struct Cli {
+    /// Input file to compress
+    #[arg(value_name = "FILE")]
+    input: String,
+
+    /// Output file path (defaults to input + .slz extension)
+    #[arg(short, long, value_name = "FILE")]
+    output: Option<String>,
+
+    /// Compression preset level (0-9, higher is better compression)
+    #[arg(short, long, value_parser = clap::value_parser!(u32).range(0..=9), default_value_t = 6)]
+    preset: u32,
+
+    /// Block size in bytes
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=4294967295))]
+    block_size: Option<u32>,
+
+    // Prefilter options (XZ-style)
+    /// Use x86 BCJ filter
+    #[arg(long)]
+    x86: bool,
+
+    /// Use ARM BCJ filter
+    #[arg(long)]
+    arm: bool,
+
+    /// Use ARM Thumb BCJ filter
+    #[arg(long)]
+    armthumb: bool,
+
+    /// Use ARM64 BCJ filter
+    #[arg(long)]
+    arm64: bool,
+
+    /// Use SPARC BCJ filter
+    #[arg(long)]
+    sparc: bool,
+
+    /// Use PowerPC BCJ filter
+    #[arg(long)]
+    powerpc: bool,
+
+    /// Use IA-64 BCJ filter
+    #[arg(long)]
+    ia64: bool,
+
+    /// Use RISC-V BCJ filter
+    #[arg(long)]
+    riscv: bool,
+
+    /// Use Delta filter with specified distance (1-256)
+    #[arg(long, value_name = "DIST")]
+    delta: Option<u16>,
+
+    /// LZMA literal context bits (0-8)
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=8))]
+    lc: Option<u8>,
+
+    /// LZMA literal position bits (0-4)
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=4))]
+    lp: Option<u8>,
+
+    /// LZMA position bits (0-4)
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=4))]
+    pb: Option<u8>,
+
+    /// Dictionary size as power of 2 (16-32, e.g., 26 = 64MiB)
+    #[arg(long, value_parser = clap::value_parser!(u8).range(16..=32), value_name = "N")]
+    dict_size: Option<u8>,
+}
+
+impl Cli {
+    fn get_prefilter(&self) -> Result<Prefilter> {
+        let mut filters = Vec::new();
+
+        if self.x86 {
+            filters.push("x86");
+        }
+        if self.arm {
+            filters.push("arm");
+        }
+        if self.armthumb {
+            filters.push("armthumb");
+        }
+        if self.arm64 {
+            filters.push("arm64");
+        }
+        if self.sparc {
+            filters.push("sparc");
+        }
+        if self.powerpc {
+            filters.push("powerpc");
+        }
+        if self.ia64 {
+            filters.push("ia64");
+        }
+        if self.riscv {
+            filters.push("riscv");
+        }
+        if self.delta.is_some() {
+            filters.push("delta");
+        }
+
+        if filters.len() > 1 {
+            eprintln!(
+                "Error: Only one prefilter can be specified at a time: {}",
+                filters.join(", ")
+            );
+            process::exit(1);
+        }
+
+        Ok(match filters.first() {
+            Some(&"x86") => Prefilter::BcjX86,
+            Some(&"arm") => Prefilter::BcjArm,
+            Some(&"armthumb") => Prefilter::BcjArmThumb,
+            Some(&"arm64") => Prefilter::BcjArm64,
+            Some(&"sparc") => Prefilter::BcjSparc,
+            Some(&"powerpc") => Prefilter::BcjPowerPc,
+            Some(&"ia64") => Prefilter::BcjIa64,
+            Some(&"riscv") => Prefilter::BcjRiscV,
+            Some(&"delta") => Prefilter::Delta {
+                distance: self.delta.unwrap_or(1).clamp(1, 256),
+            },
+            None => Prefilter::None,
+            _ => unreachable!(),
+        })
+    }
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() != 2 {
-        print_usage();
-        process::exit(1);
-    }
+    let output_filename = cli
+        .output
+        .clone()
+        .unwrap_or_else(|| format!("{}.slz", cli.input));
 
-    let input_filename = &args[1];
-
-    let output_filename = format!("{input_filename}.slz");
-
-    if let Err(error) = compress_file(input_filename, &output_filename) {
+    if let Err(error) = compress_file(&cli, &output_filename) {
         eprintln!("Error: {error}");
         process::exit(1);
     }
 
-    println!("Compressed {input_filename} into {output_filename}");
+    println!("Compressed {} into {}", cli.input, output_filename);
 }
 
-fn compress_file(input_path: &str, output_path: &str) -> Result<()> {
-    let input_file = File::open(input_path)?;
+fn compress_file(cli: &Cli, output_path: &str) -> Result<()> {
+    let input_file = File::open(&cli.input)?;
     let file_size = input_file.metadata()?.len();
     let mut input_reader = BufReader::new(input_file);
 
     let output_file = File::create(output_path)?;
     let output_writer = BufWriter::new(output_file);
 
-    let options = SLZOptions::from_preset(9);
+    let mut options = SLZOptions::from_preset(cli.preset);
+
+    let prefilter = cli.get_prefilter()?;
+    options = options.with_prefilter(prefilter);
+
+    if let Some(lc) = cli.lc {
+        options = options.with_lc(lc);
+    }
+    if let Some(lp) = cli.lp {
+        options = options.with_lp(lp);
+    }
+    if let Some(pb) = cli.pb {
+        options = options.with_pb(pb);
+    }
+    if let Some(dict_size) = cli.dict_size {
+        options = options.with_dictionary_size(dict_size);
+    }
+    if let Some(block_size) = cli.block_size {
+        options = options.with_block_size(NonZeroU32::new(block_size));
+    }
 
     let mut slz_writer = SLZWriter::new(output_writer, options);
 
@@ -97,7 +240,6 @@ fn copy_with_progress<R: Read, W: Write>(
         }
     }
 
-    // Final progress update
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
     let speed_mbs = if elapsed_secs > 0.0 {

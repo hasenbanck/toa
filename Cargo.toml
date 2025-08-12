@@ -16,6 +16,7 @@ path = "src/bin/slz.rs"
 required-features = ["std"]
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 lzma-rust2 = { version = "0.8", default-features = false, features = ["optimization", "encoder"] }
 blake3 = { version = "1.8", default-features = false, features = ["std", "no_avx512"] }
 
