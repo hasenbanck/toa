@@ -1,6 +1,6 @@
 # Streaming-LZMA Archive Format Specification
 
-Version 1.0
+Version 0.1
 
 ## 1. Introduction
 
