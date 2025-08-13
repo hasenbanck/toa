@@ -1,13 +1,12 @@
 use alloc::vec::Vec;
 
-use lzma_rust2::{
-    LZMAOptions, LZMAWriter,
-    filter::{bcj::BCJWriter, delta::DeltaWriter},
-};
-
 use super::CountingWriter;
 use crate::{
     ByteWriter, Prefilter, Result, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
+    lzma::{
+        DICT_SIZE_MAX, LZMAOptions, LZMAWriter,
+        filter::{bcj::BCJWriter, delta::DeltaWriter},
+    },
     reed_solomon::encode,
 };
 
@@ -114,16 +113,20 @@ impl Writer {
         }
     }
 
-    /// Create a new writer chain based on the options
+    /// Create a new writer chain based on the options.
     fn new(options: &SLZOptions, buffer: Vec<u8>) -> Result<Self> {
         let lzma_writer = LZMAWriter::new_no_header(
             buffer,
             &LZMAOptions {
-                dict_size: options.dict_size().min(lzma_rust2::DICT_SIZE_MAX),
+                dict_size: options.dict_size().min(DICT_SIZE_MAX),
                 lc: u32::from(options.lc),
                 lp: u32::from(options.lp),
                 pb: u32::from(options.pb),
-                ..Default::default()
+                mode: options.mode,
+                nice_len: u32::from(options.nice_len),
+                mf: options.mf,
+                depth_limit: i32::from(options.depth_limit),
+                preset_dict: None,
             },
             false,
         )?;
@@ -347,6 +350,7 @@ mod tests {
     use hex_literal::hex;
 
     use super::*;
+    use crate::lzma::EncodeMode;
 
     #[test]
     fn test_slz_writer_empty() {
@@ -359,6 +363,7 @@ mod tests {
             lp: 0,
             pb: 2,
             block_size: None,
+            ..Default::default()
         };
 
         let writer = SLZStreamingWriter::new(Cursor::new(&mut buffer), options);

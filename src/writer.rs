@@ -1,10 +1,13 @@
 mod streaming_writer;
 
-use std::{io::Write, num::NonZeroU32};
+use core::num::NonZeroU32;
 
 pub use streaming_writer::SLZStreamingWriter;
 
-use crate::Prefilter;
+use crate::{
+    Prefilter, Write,
+    lzma::{EncodeMode, lz::MFType},
+};
 
 /// Options for SLZ compression.
 #[derive(Debug, Clone, Copy)]
@@ -19,6 +22,14 @@ pub struct SLZOptions {
     lp: u8,
     /// LZMA position bits (0-4).
     pb: u8,
+    /// Compression mode.
+    pub mode: EncodeMode,
+    /// Match finder nice length.
+    pub nice_len: u16,
+    /// Match finder type.
+    pub mf: MFType,
+    /// Match finder depth limit.
+    pub depth_limit: u8,
     /// Block size in bytes. If None, all data will be written in blocks of 4 GiB - 1 B;
     block_size: Option<NonZeroU32>,
 }
@@ -31,6 +42,10 @@ impl Default for SLZOptions {
             lc: 3,
             lp: 0,
             pb: 2,
+            mode: EncodeMode::Normal,
+            nice_len: 64,
+            mf: MFType::BT4,
+            depth_limit: 0,
             block_size: None,
         }
     }
@@ -50,20 +65,53 @@ impl SLZOptions {
         26, // 64 MiB
     ];
 
-    /// Create options with a specific preset level (0-9).
-    pub fn from_preset(level: u32) -> Self {
-        let level = level.min(9);
+    const PRESET_TO_DEPTH_LIMIT: &'static [u8] = &[4, 8, 24, 48];
 
-        let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[level as usize];
-        let block_size = u32::MAX;
+    /// Create options with a specific preset level (0-9).
+    pub fn from_preset(preset: u32) -> Self {
+        let preset = preset.min(9);
+
+        let prefilter = Prefilter::None;
+        let lc = 3;
+        let lp = 0;
+        let pb = 2;
+        let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[preset as usize];
+        let block_size = NonZeroU32::new(u32::MAX);
+
+        let mode;
+        let mf;
+        let nice_len;
+        let depth_limit;
+
+        if preset <= 3 {
+            mode = EncodeMode::Fast;
+            mf = MFType::HC4;
+            nice_len = if preset <= 1 { 128 } else { 273 };
+            depth_limit = Self::PRESET_TO_DEPTH_LIMIT[preset as usize];
+        } else {
+            mode = EncodeMode::Normal;
+            mf = MFType::BT4;
+            nice_len = if preset == 4 {
+                16
+            } else if preset == 5 {
+                32
+            } else {
+                64
+            };
+            depth_limit = 0;
+        }
 
         Self {
-            prefilter: Prefilter::None,
+            prefilter,
             dictionary_size_log2,
-            lc: 3,
-            lp: 0,
-            pb: 2,
-            block_size: NonZeroU32::new(block_size),
+            lc,
+            lp,
+            pb,
+            mode,
+            nice_len,
+            mf,
+            depth_limit,
+            block_size,
         }
     }
 

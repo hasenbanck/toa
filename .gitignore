@@ -5,3 +5,4 @@
 /tests/data/*.lz
 /tests/data/*.slz
 /tests/data/*.iso
+/tests/data/*.exe

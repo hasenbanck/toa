@@ -17,12 +17,12 @@ required-features = ["std"]
 
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std", "help"] }
-lzma-rust2 = { version = "0.8", default-features = false, features = ["optimization", "encoder"] }
-blake3 = { version = "1.8", default-features = false, features = ["std", "no_avx512"] }
+blake3 = { version = "1.8", default-features = false, features = ["no_avx512"] }
 
 [dev-dependencies]
 hex-literal = "1"
 
 [features]
-default = ["std"]
-std = ["lzma-rust2/std"]
+default = ["std", "optimization"]
+std = ["blake3/std"]
+optimization = ["std"]

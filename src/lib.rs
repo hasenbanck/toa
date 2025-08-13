@@ -1,13 +1,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(unused)]
 
 extern crate alloc;
 
+mod lzma;
 mod reader;
 pub mod reed_solomon;
 #[cfg(feature = "std")]
 mod work_queue;
 pub mod writer;
+
+#[cfg(not(feature = "std"))]
+mod no_std;
 
 #[cfg(feature = "std")]
 pub(crate) use std::io::Error;
@@ -17,11 +22,11 @@ pub(crate) use std::io::Read;
 pub(crate) use std::io::Write;
 
 #[cfg(not(feature = "std"))]
-pub use lzma_rust2::Error;
+pub use no_std::Error;
 #[cfg(not(feature = "std"))]
-pub use lzma_rust2::Read;
+pub use no_std::Read;
 #[cfg(not(feature = "std"))]
-pub use lzma_rust2::Write;
+pub use no_std::Write;
 pub use writer::{SLZOptions, SLZStreamingWriter};
 
 /// Result type of the crate.
@@ -91,6 +96,8 @@ trait ByteReader {
 
     fn read_u32(&mut self) -> Result<u32>;
 
+    fn read_u32_be(&mut self) -> Result<u32>;
+
     fn read_u64(&mut self) -> Result<u64>;
 }
 
@@ -115,6 +122,13 @@ impl<T: Read> ByteReader for T {
         let mut buf = [0; 4];
         self.read_exact(buf.as_mut())?;
         Ok(u32::from_le_bytes(buf))
+    }
+
+    #[inline(always)]
+    fn read_u32_be(&mut self) -> Result<u32> {
+        let mut buf = [0; 4];
+        self.read_exact(buf.as_mut())?;
+        Ok(u32::from_be_bytes(buf))
     }
 
     #[inline(always)]
