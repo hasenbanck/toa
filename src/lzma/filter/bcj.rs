@@ -190,7 +190,6 @@ impl<R: Read> Read for BCJReader<R> {
 }
 
 /// Writer that applies BCJ (Branch/Call/Jump) filtering to data before compression.
-
 pub struct BCJWriter<W> {
     inner: W,
     filter: BCJFilter,

@@ -168,7 +168,7 @@ Block properties:
 - BCJ filters compute jumps/calls relative to the block start, not the file start
 - No compression dictionary or filter state is shared between blocks
 
-**LZMA Stream Format**: Raw LZMA stream data without end-of-stream marker (block size provides boundary)
+**LZMA Stream Format**: Raw LZMA stream data with end-of-stream marker
 
 ### 4.2 Block Size Recommendations
 

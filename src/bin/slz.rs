@@ -1,17 +1,20 @@
 use std::{
-    fs::File,
-    io::{self, BufReader, BufWriter, Read, Result, Write},
+    fs::{self, File},
+    io::{self, BufReader, BufWriter, Result, Write},
     num::NonZeroU32,
     process,
     time::Instant,
 };
 
 use clap::{Arg, ArgMatches, Command, value_parser};
-use slz::{Prefilter, SLZOptions, SLZStreamingWriter};
+use slz::{Prefilter, SLZMetadata, SLZOptions, SLZStreamingReader, SLZStreamingWriter};
 
 struct Cli {
     input: String,
     output: Option<String>,
+    extract: bool,
+    list: bool,
+    keep: bool,
     preset: u32,
     block_size: Option<u32>,
     x86: bool,
@@ -32,18 +35,40 @@ struct Cli {
 impl Cli {
     fn build_command() -> Command {
         Command::new("slz")
-            .about("Compress files using the SLZ (Streaming LZMA) format")
+            .about("Compress and decompress files using the SLZ (Streaming LZMA) format")
             .version(env!("CARGO_PKG_VERSION"))
             .arg(
                 Arg::new("input")
-                    .help("Input file to compress")
+                    .help("Input file to compress or decompress")
                     .value_name("FILE")
                     .required(true)
                     .index(1),
             )
             .arg(
+                Arg::new("extract")
+                    .help("Decompress/extract the input file")
+                    .short('d')
+                    .long("decompress")
+                    .alias("extract")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("list")
+                    .help("List information about the SLZ file")
+                    .short('l')
+                    .long("list")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("keep")
+                    .help("Keep input file after compression/decompression")
+                    .short('k')
+                    .long("keep")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
                 Arg::new("output")
-                    .help("Output file path (defaults to input + .slz extension)")
+                    .help("Output file path (defaults to input + .slz for compression, or input without .slz for extraction)")
                     .short('o')
                     .long("output")
                     .value_name("FILE"),
@@ -149,6 +174,9 @@ impl Cli {
         Self {
             input: matches.get_one::<String>("input").unwrap().clone(),
             output: matches.get_one::<String>("output").cloned(),
+            extract: matches.get_flag("extract"),
+            list: matches.get_flag("list"),
+            keep: matches.get_flag("keep"),
             preset: *matches.get_one::<u32>("preset").unwrap(),
             block_size: matches.get_one::<u32>("block-size").copied(),
             x86: matches.get_flag("x86"),
@@ -224,26 +252,106 @@ impl Cli {
     }
 }
 
-fn main() {
+fn main() -> Result<()> {
     let matches = Cli::build_command().get_matches();
     let cli = Cli::from_matches(&matches);
 
-    let output_filename = cli
-        .output
-        .clone()
-        .unwrap_or_else(|| format!("{}.slz", cli.input));
+    if cli.list {
+        // List mode - show metadata
+        if let Err(error) = list_file_info(&cli) {
+            eprintln!("Error: {error}");
+            process::exit(1);
+        }
+    } else if cli.extract {
+        // Extraction mode
+        let output_filename = cli.output.clone().unwrap_or_else(|| {
+            if cli.input.ends_with(".slz") {
+                cli.input[..cli.input.len() - 4].to_string()
+            } else {
+                format!("{}.extracted", cli.input)
+            }
+        });
 
-    if let Err(error) = compress_file(&cli, &output_filename) {
-        eprintln!("Error: {error}");
-        process::exit(1);
+        let (compressed_size, uncompressed_size, elapsed) =
+            match decompress_file(&cli, &output_filename) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    process::exit(1);
+                }
+            };
+
+        let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+            (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
+        } else {
+            0.0
+        };
+
+        println!("Compressed:   {compressed_size} bytes");
+        println!("Uncompressed: {uncompressed_size} bytes");
+        println!(
+            "Compression ratio: {:.2}% bytes",
+            if uncompressed_size > 0 {
+                (compressed_size as f64 / uncompressed_size as f64) * 100.0
+            } else {
+                0.0
+            },
+        );
+        println!("Decompression time: {:.3}s", elapsed.as_secs_f64(),);
+        println!("Decompression speed: {speed_mibs:.1} MiB/s");
+
+        if !cli.keep
+            && let Err(error) = remove_input_file(&cli.input)
+        {
+            eprintln!("Warning: Failed to remove input file: {error}");
+        }
+    } else {
+        // Compression mode
+        let output_filename = cli
+            .output
+            .clone()
+            .unwrap_or_else(|| format!("{}.slz", cli.input));
+
+        let (uncompressed_size, compressed_size, elapsed) =
+            match compress_file(&cli, &output_filename) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    process::exit(1);
+                }
+            };
+
+        let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+            (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
+        } else {
+            0.0
+        };
+
+        println!("Compressed:   {compressed_size} bytes");
+        println!("Uncompressed: {uncompressed_size} bytes");
+        println!(
+            "Compression ratio: {:.2}% bytes",
+            if uncompressed_size > 0 {
+                (compressed_size as f64 / uncompressed_size as f64) * 100.0
+            } else {
+                0.0
+            },
+        );
+        println!("Compression time: {:.3}s", elapsed.as_secs_f64(),);
+        println!("Compression speed: {speed_mibs:.1} MiB/s");
+
+        if !cli.keep
+            && let Err(error) = remove_input_file(&cli.input)
+        {
+            eprintln!("Warning: Failed to remove input file: {error}");
+        }
     }
 
-    println!("Compressed {} into {}", cli.input, output_filename);
+    Ok(())
 }
 
-fn compress_file(cli: &Cli, output_path: &str) -> Result<()> {
+fn compress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::Duration)> {
     let input_file = File::open(&cli.input)?;
-    let file_size = input_file.metadata()?.len();
     let mut input_reader = BufReader::new(input_file);
 
     let output_file = File::create(output_path)?;
@@ -272,67 +380,125 @@ fn compress_file(cli: &Cli, output_path: &str) -> Result<()> {
 
     let mut slz_writer = SLZStreamingWriter::new(output_writer, options);
 
-    copy_with_progress(&mut input_reader, &mut slz_writer, file_size)?;
-
-    // Clear progress line
-    print!("\r{:<80}\r", "");
+    let start_time = Instant::now();
+    let bytes_read = io::copy(&mut input_reader, &mut slz_writer)?;
+    let elapsed = start_time.elapsed();
 
     slz_writer.finish()?;
+
+    let compressed_size = fs::metadata(output_path)?.len();
+
+    Ok((bytes_read, compressed_size, elapsed))
+}
+
+fn decompress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::Duration)> {
+    let input_file = File::open(&cli.input)?;
+
+    let input_reader = BufReader::new(input_file);
+    let output_file = File::create(output_path)?;
+    let mut output_writer = BufWriter::new(output_file);
+
+    let mut slz_reader = SLZStreamingReader::new(input_reader, true);
+
+    let start_time = Instant::now();
+    let bytes_written = io::copy(&mut slz_reader, &mut output_writer)?;
+    let elapsed = start_time.elapsed();
+
+    output_writer.flush()?;
+
+    let inner = slz_reader.into_inner().into_inner();
+    let compressed_size = inner.metadata()?.len();
+
+    Ok((compressed_size, bytes_written, elapsed))
+}
+
+fn remove_input_file(input_path: &str) -> Result<()> {
+    fs::remove_file(input_path)?;
+    Ok(())
+}
+
+fn list_file_info(cli: &Cli) -> Result<()> {
+    let input_file = File::open(&cli.input)?;
+    let metadata = SLZMetadata::parse(input_file)?;
+
+    println!("Archive: {}", cli.input);
+    println!("  Format version: 1");
+    println!("  Prefilter: {}", format_prefilter(&metadata.prefilter));
+    println!("  LZMA properties:");
+    println!("    Literal context bits (lc): {}", metadata.lc);
+    println!("    Literal position bits (lp): {}", metadata.lp);
+    println!("    Position bits (pb): {}", metadata.pb);
+    println!(
+        "    Dictionary size: {} bytes ({:.1} MiB)",
+        metadata.dict_size,
+        metadata.dict_size as f64 / (1024.0 * 1024.0)
+    );
+    println!("  Structure:");
+    println!("    Block count: {}", metadata.block_count);
+    if metadata.block_count > 0 {
+        let avg_block_size = metadata.compressed_size / metadata.block_count as u64;
+        println!(
+            "    Average block size: {} bytes ({:.1} KiB)",
+            avg_block_size,
+            avg_block_size as f64 / 1024.0
+        );
+    }
+    println!("  Sizes:");
+    println!(
+        "    Uncompressed size: {} bytes ({:.1} MiB)",
+        metadata.uncompressed_size,
+        metadata.uncompressed_size as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "    Compressed size: {} bytes ({:.1} MiB)",
+        metadata.compressed_size,
+        metadata.compressed_size as f64 / (1024.0 * 1024.0)
+    );
+    if metadata.uncompressed_size > 0 {
+        println!(
+            "    Compression ratio: {:.2}%",
+            (metadata.compressed_size as f64 / metadata.uncompressed_size as f64) * 100.0
+        );
+        if metadata.compressed_size <= metadata.uncompressed_size {
+            println!(
+                "    Space saved: {:.2}%",
+                ((metadata.uncompressed_size - metadata.compressed_size) as f64
+                    / metadata.uncompressed_size as f64)
+                    * 100.0
+            );
+        } else {
+            println!(
+                "    Space overhead: {:.2}%",
+                ((metadata.compressed_size - metadata.uncompressed_size) as f64
+                    / metadata.uncompressed_size as f64)
+                    * 100.0
+            );
+        }
+    }
+    println!("  Integrity:");
+    println!("    Blake3 hash: {}", format_hex(&metadata.blake3_hash));
+    println!("    RS parity: {}", format_hex(&metadata.rs_parity));
+    println!("    Hash validated: {}", metadata.validated);
+    println!("    Hash corrected: {}", metadata.corrected);
 
     Ok(())
 }
 
-fn copy_with_progress<R: Read, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    total_size: u64,
-) -> Result<u64> {
-    let mut buf = [0; 8192];
-    let mut total_copied = 0u64;
-    let start_time = Instant::now();
-    let mut last_update = Instant::now();
-
-    loop {
-        let bytes_read = reader.read(&mut buf)?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        writer.write_all(&buf[..bytes_read])?;
-        total_copied += bytes_read as u64;
-
-        // Update progress every 100ms
-        if last_update.elapsed().as_millis() >= 100 {
-            let elapsed = start_time.elapsed();
-            let elapsed_secs = elapsed.as_secs_f64();
-            let speed_mbs = if elapsed_secs > 0.0 {
-                (total_copied as f64) / (1024.0 * 1024.0 * elapsed_secs)
-            } else {
-                0.0
-            };
-
-            let progress_percent = if total_size > 0 {
-                (total_copied as f64 / total_size as f64 * 100.0) as u32
-            } else {
-                0
-            };
-
-            print!("\rProgress: {}% ({:.1} MB/s)", progress_percent, speed_mbs);
-            io::stdout().flush().unwrap_or(());
-            last_update = Instant::now();
-        }
+fn format_prefilter(prefilter: &Prefilter) -> String {
+    match prefilter {
+        Prefilter::None => "None".to_string(),
+        Prefilter::Delta { distance } => format!("Delta (distance: {})", distance),
+        Prefilter::BcjX86 => "BCJ x86".to_string(),
+        Prefilter::BcjArm => "BCJ ARM".to_string(),
+        Prefilter::BcjArmThumb => "BCJ ARM Thumb".to_string(),
+        Prefilter::BcjArm64 => "BCJ ARM64".to_string(),
+        Prefilter::BcjSparc => "BCJ SPARC".to_string(),
+        Prefilter::BcjPowerPc => "BCJ PowerPC".to_string(),
+        Prefilter::BcjIa64 => "BCJ IA-64".to_string(),
+        Prefilter::BcjRiscV => "BCJ RISC-V".to_string(),
     }
+}
 
-    let elapsed = start_time.elapsed();
-    let elapsed_secs = elapsed.as_secs_f64();
-    let speed_mbs = if elapsed_secs > 0.0 {
-        (total_copied as f64) / (1024.0 * 1024.0 * elapsed_secs)
-    } else {
-        0.0
-    };
-
-    println!("\rProgress: 100% ({:.1} MB/s)", speed_mbs);
-    io::stdout().flush().unwrap_or(());
-
-    Ok(total_copied)
+fn format_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }

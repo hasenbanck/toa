@@ -58,61 +58,6 @@ impl Write for Writer {
 }
 
 impl Writer {
-    /// Finish the writer chain and extract the compressed data
-    fn finish(self) -> Result<Vec<u8>> {
-        match self {
-            Writer::Lzma(writer) => {
-                let buffer = writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::Delta(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjX86(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjArm(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjArmThumb(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjArm64(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjSparc(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjPowerPc(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjIa64(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-            Writer::BcjRiscV(writer) => {
-                let lzma_writer = writer.into_inner();
-                let buffer = lzma_writer.finish()?;
-                Ok(buffer)
-            }
-        }
-    }
-
     /// Create a new writer chain based on the options.
     fn new(options: &SLZOptions, buffer: Vec<u8>) -> Result<Self> {
         let lzma_writer = LZMAWriter::new_no_header(
@@ -128,7 +73,7 @@ impl Writer {
                 depth_limit: i32::from(options.depth_limit),
                 preset_dict: None,
             },
-            false,
+            true,
         )?;
 
         #[rustfmt::skip]
@@ -146,6 +91,22 @@ impl Writer {
         };
 
         Ok(chain)
+    }
+
+    /// Finish the writer chain and extract the compressed data
+    fn finish(self) -> Result<Vec<u8>> {
+        match self {
+            Writer::Lzma(writer) => writer.finish(),
+            Writer::Delta(writer) => writer.into_inner().finish(),
+            Writer::BcjX86(writer) => writer.into_inner().finish(),
+            Writer::BcjArm(writer) => writer.into_inner().finish(),
+            Writer::BcjArmThumb(writer) => writer.into_inner().finish(),
+            Writer::BcjArm64(writer) => writer.into_inner().finish(),
+            Writer::BcjSparc(writer) => writer.into_inner().finish(),
+            Writer::BcjPowerPc(writer) => writer.into_inner().finish(),
+            Writer::BcjIa64(writer) => writer.into_inner().finish(),
+            Writer::BcjRiscV(writer) => writer.into_inner().finish(),
+        }
     }
 }
 
@@ -186,7 +147,7 @@ impl<W: Write> SLZStreamingWriter<W> {
         // Version
         self.inner.write_u8(SLZ_VERSION)?;
 
-        // Prefilter configuration byte
+        // Prefilter configuration byte.
         let config = u8::from(self.options.prefilter);
         self.inner.write_u8(config)?;
 

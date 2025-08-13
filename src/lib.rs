@@ -11,6 +11,7 @@ pub mod reed_solomon;
 mod work_queue;
 pub mod writer;
 
+mod metadata;
 #[cfg(not(feature = "std"))]
 mod no_std;
 
@@ -20,13 +21,17 @@ pub(crate) use std::io::Error;
 pub(crate) use std::io::Read;
 #[cfg(feature = "std")]
 pub(crate) use std::io::Write;
+#[cfg(feature = "std")]
+pub(crate) use std::io::{Seek, SeekFrom};
 
+pub use metadata::SLZMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;
 #[cfg(not(feature = "std"))]
 pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
+pub use reader::SLZStreamingReader;
 pub use writer::{SLZOptions, SLZStreamingWriter};
 
 /// Result type of the crate.
@@ -91,7 +96,7 @@ fn set_error(
     shutdown_flag.store(true, std::sync::atomic::Ordering::Release);
 }
 
-trait ByteReader {
+pub trait ByteReader {
     fn read_u8(&mut self) -> Result<u8>;
 
     fn read_u32(&mut self) -> Result<u32>;

@@ -490,7 +490,7 @@ fn verify_correction(codeword_poly: &[u8; CODEWORD_SIZE]) -> bool {
 
 /// Decode codeword in-place (data || parity).
 ///
-/// Returns true if the data was not corrupted. False if the data was corrected but could be
+/// Returns false if the data was not corrupted. False if the data was corrected but could be
 /// corrected. Returns an error if the data was corrupted and could not be corrected.
 ///
 /// The decoder is a classic Peterson–Gorenstein–Zierler decoder.
@@ -506,7 +506,7 @@ pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> 
     let mut syndromes = [0u8; PARITY_LEN];
     if calculate_syndromes(&mut c, &mut syndromes) {
         // No errors found, the data is already correct.
-        return Ok(true);
+        return Ok(false);
     }
 
     // Step 2: Find error locator polynomial Λ(x).
@@ -535,7 +535,7 @@ pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> 
     // Step 8: Write corrected data back into the original buffer.
     codeword[..DATA_LEN].copy_from_slice(&c[PARITY_LEN..]);
 
-    Ok(false)
+    Ok(true)
 }
 
 #[cfg(test)]
