@@ -17,12 +17,14 @@ required-features = ["std"]
 
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std", "help"] }
-blake3 = { version = "1.8", default-features = false, features = ["no_avx512"] }
+blake3 = { version = "1", default-features = false, features = ["no_avx512"], optional = true }
 
 [dev-dependencies]
 hex-literal = "1"
 
 [features]
 default = ["std", "optimization"]
-std = ["blake3/std"]
+# Uses the official release instead of the reference implementation
+blake3 = ["dep:blake3"]
+std = []
 optimization = ["std"]

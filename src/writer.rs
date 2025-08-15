@@ -1,11 +1,12 @@
 mod streaming_writer;
 
 use core::num::NonZeroU32;
+use std::num::NonZeroU64;
 
 pub use streaming_writer::SLZStreamingWriter;
 
 use crate::{
-    Prefilter, Write,
+    Prefilter, Write, lzma,
     lzma::{EncodeMode, lz::MFType},
 };
 
@@ -13,25 +14,25 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub struct SLZOptions {
     /// Prefilter to apply before compression.
-    prefilter: Prefilter,
+    pub(crate) prefilter: Prefilter,
     /// Dictionary size to use for the LZMA compression algorithm as a power of two.
-    dictionary_size_log2: u8,
+    pub(crate) dictionary_size_log2: u8,
     /// LZMA literal context bits (0-8).
-    lc: u8,
+    pub(crate) lc: u8,
     /// LZMA literal position bits (0-4).
-    lp: u8,
+    pub(crate) lp: u8,
     /// LZMA position bits (0-4).
-    pb: u8,
+    pub(crate) pb: u8,
     /// Compression mode.
-    pub mode: EncodeMode,
+    pub(crate) mode: EncodeMode,
     /// Match finder nice length.
-    pub nice_len: u16,
+    pub(crate) nice_len: u16,
     /// Match finder type.
-    pub mf: MFType,
+    pub(crate) mf: MFType,
     /// Match finder depth limit.
-    pub depth_limit: u8,
-    /// Block size in bytes. If None, all data will be written in blocks of 4 GiB - 1 B;
-    block_size: Option<NonZeroU32>,
+    pub(crate) depth_limit: u8,
+    /// Block size in uncompressed bytes. If None, all data will be written in one block.
+    pub(crate) block_size: Option<NonZeroU64>,
 }
 
 impl Default for SLZOptions {
@@ -76,7 +77,7 @@ impl SLZOptions {
         let lp = 0;
         let pb = 2;
         let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[preset as usize];
-        let block_size = NonZeroU32::new(u32::MAX);
+        let block_size = NonZeroU64::new(u64::MAX);
 
         let mode;
         let mf;
@@ -155,14 +156,14 @@ impl SLZOptions {
 
     /// Set the dictionary size of the LZMA compression algorithm.
     ///
-    /// Clamped in range of 16 (64 KiB) and 32 (4 GiB).
+    /// Clamped in range of 16 (64 KiB) and 31 (2 GiB).
     pub fn with_dictionary_size(mut self, dictionary_size_log2: u8) -> Self {
-        self.dictionary_size_log2 = dictionary_size_log2.clamp(16, 32);
+        self.dictionary_size_log2 = dictionary_size_log2.clamp(16, 31);
         self
     }
 
     /// Set the block size for multi-block compression.
-    pub fn with_block_size(mut self, block_size: Option<NonZeroU32>) -> Self {
+    pub fn with_block_size(mut self, block_size: Option<NonZeroU64>) -> Self {
         self.block_size = block_size;
         self
     }
@@ -170,37 +171,6 @@ impl SLZOptions {
     /// Get dictionary size in bytes.
     pub fn dict_size(&self) -> u32 {
         2u32.pow(self.dictionary_size_log2 as u32)
-    }
-}
-
-/// A writer that counts the bytes written (uncompressed data).
-struct CountingWriter<W> {
-    inner: W,
-    count: u64,
-}
-
-impl<W> CountingWriter<W> {
-    fn new(inner: W) -> Self {
-        Self { inner, count: 0 }
-    }
-
-    fn bytes_written(&self) -> u64 {
-        self.count
-    }
-
-    fn into_inner(self) -> W {
-        self.inner
-    }
-}
-
-impl<W: Write> Write for CountingWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> crate::Result<usize> {
-        let bytes_written = self.inner.write(buf)?;
-        self.count += bytes_written as u64;
-        Ok(bytes_written)
-    }
-
-    fn flush(&mut self) -> crate::Result<()> {
-        self.inner.flush()
+            .min(lzma::DICT_SIZE_MAX)
     }
 }

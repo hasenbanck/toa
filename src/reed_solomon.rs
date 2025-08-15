@@ -1,10 +1,15 @@
 //! Stack only Reed–Solomon implementation.
 //!
-//! Specification:
+//! ## Specification
+//!
 //! - Field: GF(2^8) = GF(256)
 //! - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
 //! - Generator: α = 2
 //! - Code: (n=64, k=32, t=16)
+//!
+//! ## License
+//!
+//! The code in this file is in the public domain or can be licensed under the Apache 2 License.
 
 /// The size of the data payload.
 pub const DATA_LEN: usize = 32;
@@ -540,6 +545,8 @@ pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> 
 
 #[cfg(test)]
 mod tests {
+    use hex_literal::hex;
+
     use super::*;
 
     struct Lcg(u32);
@@ -672,5 +679,62 @@ mod tests {
         let res = decode(&mut cw);
 
         assert!(res.is_err(), "decoding should fail with too many errors");
+    }
+
+    fn test_vector(data: [u8; 32], expected_parity: [u8; 32]) {
+        let parity = encode(&data);
+
+        assert_eq!(parity, expected_parity);
+
+        let mut cw = [0u8; CODEWORD_SIZE];
+        cw[..DATA_LEN].copy_from_slice(&data);
+        cw[DATA_LEN..].copy_from_slice(&parity);
+
+        decode(&mut cw).expect("should decode with no errors");
+
+        assert_eq!(cw[..DATA_LEN], data);
+    }
+
+    #[test]
+    fn test_specification_test_vector_1() {
+        let data = hex!("0000000000000000000000000000000000000000000000000000000000000000");
+        let expected_parity =
+            hex!("0000000000000000000000000000000000000000000000000000000000000000");
+        test_vector(data, expected_parity);
+        test_vector(data, expected_parity);
+    }
+
+    #[test]
+    fn test_specification_test_vector_2() {
+        let data = hex!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        let expected_parity =
+            hex!("caabc74d87d23ad8a0a2bff5134bf7499e1b2859fb692e40b8d8e6fa8bfb5620");
+        test_vector(data, expected_parity);
+    }
+
+    #[test]
+    fn test_specification_test_vector_3() {
+        let data = hex!("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let expected_parity =
+            hex!("d8e4dab6534b241cb9afcb999503ec2d8c393a30f96e719970cee1d547f75acb");
+        test_vector(data, expected_parity);
+        test_vector(data, expected_parity);
+    }
+
+    #[test]
+    fn test_specification_test_vector_4() {
+        let data = hex!("dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f");
+        let expected_parity =
+            hex!("0e54d343ed7e6ffaf7e650525685934403006ad1428d2c9d0869b67b1920bea6");
+        test_vector(data, expected_parity);
+        test_vector(data, expected_parity);
+    }
+
+    #[test]
+    fn test_specification_test_vector_5() {
+        let data = hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
+        let expected_parity =
+            hex!("cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d");
+        test_vector(data, expected_parity);
     }
 }

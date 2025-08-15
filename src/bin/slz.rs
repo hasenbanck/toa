@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
     io::{self, BufReader, BufWriter, Result, Write},
-    num::NonZeroU32,
+    num::NonZeroU64,
     process,
     time::Instant,
 };
@@ -16,7 +16,7 @@ struct Cli {
     list: bool,
     keep: bool,
     preset: u32,
-    block_size: Option<u32>,
+    block_size: Option<u64>,
     x86: bool,
     arm: bool,
     armthumb: bool,
@@ -83,10 +83,10 @@ impl Cli {
             )
             .arg(
                 Arg::new("block-size")
-                    .help("Block size in bytes")
+                    .help("Block size in uncompressed bytes")
                     .long("block-size")
                     .value_name("bytes")
-                    .value_parser(value_parser!(u32).range(1..=4294967295)),
+                    .value_parser(value_parser!(u64).range(1..=18446744073709551615)),
             )
             .arg(
                 Arg::new("x86")
@@ -163,10 +163,10 @@ impl Cli {
             )
             .arg(
                 Arg::new("dict-size")
-                    .help("Dictionary size as power of 2 (16-32, e.g., 26 = 64MiB)")
+                    .help("Dictionary size as power of 2 (16-30, e.g., 26 = 64MiB)")
                     .long("dict-size")
                     .value_name("N")
-                    .value_parser(value_parser!(u8).range(16..=32)),
+                    .value_parser(value_parser!(u8).range(16..=30)),
             )
     }
 
@@ -178,7 +178,7 @@ impl Cli {
             list: matches.get_flag("list"),
             keep: matches.get_flag("keep"),
             preset: *matches.get_one::<u32>("preset").unwrap(),
-            block_size: matches.get_one::<u32>("block-size").copied(),
+            block_size: matches.get_one::<u64>("block-size").copied(),
             x86: matches.get_flag("x86"),
             arm: matches.get_flag("arm"),
             armthumb: matches.get_flag("armthumb"),
@@ -375,7 +375,7 @@ fn compress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::D
         options = options.with_dictionary_size(dict_size);
     }
     if let Some(block_size) = cli.block_size {
-        options = options.with_block_size(NonZeroU32::new(block_size));
+        options = options.with_block_size(NonZeroU64::new(block_size));
     }
 
     let mut slz_writer = SLZStreamingWriter::new(output_writer, options);

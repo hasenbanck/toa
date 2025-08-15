@@ -4,6 +4,8 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "blake3"))]
+pub(crate) mod blake3;
 mod lzma;
 mod reader;
 pub mod reed_solomon;
@@ -11,9 +13,11 @@ pub mod reed_solomon;
 mod work_queue;
 pub mod writer;
 
+mod header;
 mod metadata;
 #[cfg(not(feature = "std"))]
 mod no_std;
+mod trailer;
 
 #[cfg(feature = "std")]
 pub(crate) use std::io::Error;
@@ -24,6 +28,9 @@ pub(crate) use std::io::Write;
 #[cfg(feature = "std")]
 pub(crate) use std::io::{Seek, SeekFrom};
 
+#[cfg(feature = "blake3")]
+pub use blake3;
+use header::SLZHeader;
 pub use metadata::SLZMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;
@@ -32,7 +39,10 @@ pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
 pub use reader::SLZStreamingReader;
+use trailer::SLZTrailer;
 pub use writer::{SLZOptions, SLZStreamingWriter};
+
+use crate::reed_solomon::decode;
 
 /// Result type of the crate.
 #[cfg(feature = "std")]

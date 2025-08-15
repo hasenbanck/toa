@@ -19,7 +19,7 @@ pub struct SLZMetadata {
     /// Dictionary size used
     pub dict_size: u32,
     /// Number of compressed blocks in the file
-    pub block_count: u32,
+    pub block_count: u64,
     /// Total uncompressed size of all data
     pub uncompressed_size: u64,
     /// Total compressed size of all data (excluding header and trailer)
@@ -100,23 +100,25 @@ impl SLZMetadata {
         }
         let dict_size = 2u32.pow((dict_size_log2 + 16) as u32);
 
-        let mut block_count = 0u32;
+        let mut compressed_size = 0u64;
+
+        let mut block_count = 0u64;
         loop {
-            let block_size = reader.read_u32()?;
+            let block_size = reader.read_u64()?;
             if block_size == 0 {
                 // End-of-blocks marker found
                 break;
             }
+            compressed_size += block_size;
             block_count += 1;
 
             reader.seek(SeekFrom::Current(block_size as i64))?;
         }
 
-        // 80 bytes for trailer
-        reader.seek(SeekFrom::End(-80))?;
+        // 72 bytes for trailer
+        reader.seek(SeekFrom::End(-72))?;
 
         let uncompressed_size = reader.read_u64()?;
-        let compressed_size = reader.read_u64()?;
 
         let mut blake3_hash = [0u8; 32];
         reader.read_exact(&mut blake3_hash)?;

@@ -1,6 +1,6 @@
 # Streaming-LZMA Archive Format Specification
 
-Version 0.1
+Version 0.3
 
 ## 1. Introduction
 
@@ -45,9 +45,9 @@ A Streaming-LZMA file consists of three sections:
 +==================+
 |      Header      |  (Variable: 6-9 bytes)
 +==================+
-|      Blocks      |  (Variable: 1 or more blocks)
+|      Blocks      |  (Variable: 0 or more blocks, but always ending with a end-of-blocks marker)
 +==================+
-|     Trailer      |  (Fixed: 80 bytes)
+|     Trailer      |  (Fixed: 72 bytes)
 +==================+
 ```
 
@@ -99,7 +99,7 @@ One byte indicating the optional prefilter:
 - 0x09: BCJ RISC-V
 - 0x0A-0xFF: Reserved
 
-The prefilter are the same as used by LZMA SDK and liblzma.
+The prefilters are the same as used by LZMA SDK and liblzma.
 
 ### 3.4 LZMA Properties
 
@@ -111,10 +111,16 @@ Two bytes encoding LZMA compression parameters:
     - pb: number of position bits (0-4)
 - **Byte 1**: Dictionary size as power of 2 (size = 2^(n+16))
 
-Valid dictionary sizes range from 64 KiB (n=0) to 4 GiB (n=16).
+Valid dictionary sizes range from 64 KiB (n=0) to 2 GiB (n=15).
 
-**Note on LZMA parameters**: While the default LZMA parameters (lc=3, lp=0, pb=2) work well for most data,
-BCJ filters benefit from adjusted parameters. For example:
+Examples:
+
+- n=0: 2^16 = 64 KiB
+- n=8: 2^24 = 16 MiB
+- n=15: 2^31 = 2 GiB
+
+**Note on LZMA parameters**: While the default LZMA parameters (lc=3, lp=0, pb=2) work
+well for most data, BCJ filters benefit from adjusted parameters. For example:
 
 - ARM64 executable: lc=2,lp=2,pb=2
 - RISC-V executable: lc=2,lp=2,pb=2
@@ -127,7 +133,7 @@ Filter-specific configuration parameters:
 
 **Delta filter** (1 byte):
 
-- Byte 0: Distance minus 1 (0x00 represents distance 1, 0xFF represents distance 256)
+- Byte 0: Distance minus 1 (0x00 represents distance 1, 0xFF represents distance 256, values 0x00-0xFF are valid)
 
 **BCJ filters**: No additional properties (offset is always 0)
 
@@ -137,13 +143,13 @@ The blocks section contains any number of compressed blocks followed by an end m
 
 ```
 +---------------------+--------------------+
-| Block 0 Size (4B)   | Block 0 Data       |
+| Block 0 Size (8B)   | Block 0 Data       |
 +---------------------+--------------------+
-| Block 1 Size (4B)   | Block 1 Data       |
+| Block 1 Size (8B)   | Block 1 Data       |
 +---------------------+--------------------+
 |         ...         |       ...          |
 +---------------------+--------------------+
-| 0x00 0x00 0x00 0x00 | (End-of-blocks)    |
+| 8 * 0x00            | (End-of-blocks)    |
 +------------------------------------------+
 ```
 
@@ -151,24 +157,22 @@ The blocks section contains any number of compressed blocks followed by an end m
 
 Each block consists of:
 
-- **Size** (4 bytes): Compressed size of the block data in bytes, stored as little-endian uint32
+- **Size** (8 bytes): Compressed size of the block data in bytes, stored as little-endian uint64
 - **Data**: LZMA compressed data stream
 
 Block properties:
 
-- Minimum size: 1 B    (size field value 0x00000001)
-- Maximum size: (4 GiB - 1 B) (size field value 0xFFFFFFFF)
+- Minimum size: 1 B          (size field value 0x0000000000000001)
+- Maximum size: 16 EiB - 1 B (size field value 0xFFFFFFFFFFFFFFFF)
 - Zero-length blocks are not permitted
-- Files larger than (4 GiB - 1 B) MUST be split across multiple blocks
 
 **Block Independence**: Each block is completely independent:
 
 - LZMA encoder state is reset for each block (fresh dictionary, reset probability models)
 - Prefilters (if used) are reset for each block with no state carried between blocks
-- BCJ filters compute jumps/calls relative to the block start, not the file start
 - No compression dictionary or filter state is shared between blocks
 
-**LZMA Stream Format**: Raw LZMA stream data with end-of-stream marker
+**LZMA Stream Format**: Raw LZMA stream data with end-of-stream marker (the distance-length pair of 0xFFFFFFFF, 2).
 
 ### 4.2 Block Size Recommendations
 
@@ -199,8 +203,8 @@ memory requirements and provide configuration options.
 
 ### 4.3 End-of-Blocks Marker
 
-The sequence 0x00 0x00 0x00 0x00 indicates the end of blocks. Since zero-length blocks are invalid, this sequence
-unambiguously marks the end of the blocks section.
+The sequence `0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00` indicates the end of blocks. Since zero-length blocks are
+invalid, this sequence unambiguously marks the end of the blocks section.
 
 ## 5. Trailer Format
 
@@ -210,26 +214,22 @@ The trailer provides integrity verification and metadata:
 +---------------------+
 | Uncompressed Size   |  (8 bytes, little-endian)
 +---------------------+
-| Compressed Size     |  (8 bytes, little-endian)
-+---------------------+
 | Blake3 Hash         |  (32 bytes)
 +---------------------+
 | Reed-Solomon Parity |  (32 bytes)
 +---------------------+
 ```
 
-### 5.1 Size Fields
+### 5.1 Size Field
 
 **Uncompressed Size**: Total size of decompressed data in bytes (informational)
-**Compressed Size**: Total size of all compressed blocks in bytes (informational)
 
-These fields are provided for informational purposes only. They are protected against corruption by their position
-before the RS-protected hash, but they are not included in the hash calculation and thus not authenticated.
-Implementations MUST NOT rely on these fields for security decisions or buffer allocation without independent
+This field is provided for informational purposes only. It is protected against corruption by its position
+before the RS-protected hash, but it is not included in the hash calculation and thus not authenticated.
+Implementations MUST NOT rely on this field for security decisions or buffer allocation without independent
 validation.
 
-The compressed size represents the size of the concatenated block data (without the block sizes).
-The uncompressed size represents the size of the concatenated uncompressed data.
+The uncompressed size represents the size of the concatenated uncompressed data of all blocks.
 
 ### 5.2 Blake3 Hash
 
@@ -237,7 +237,8 @@ A 256-bit Blake3 hash computed over the concatenated uncompressed data of all bl
 
 ### 5.3 Reed-Solomon Error Correction
 
-32 bytes of Reed-Solomon parity data protecting the Blake3 hash.
+32 bytes of Reed-Solomon parity data protecting the Blake3 hash. The 32 byte hash is treated as 32 message symbols,
+producing 32 parity symbols, for a total codeword of 64 symbols.
 
 Parameters:
 
@@ -249,7 +250,11 @@ Parameters:
 **Encoding**: The 32-byte Blake3 hash is treated as a sequence of 32 consecutive bytes [h₀, h₁, ..., h₃₁] for
 Reed-Solomon encoding. No byte reordering or integer interpretation is performed.
 
-The code can correct up to 16 byte errors in the hash field.
+**Decoding**: The code guarantees correction of up to 16 byte errors in the hash field using traditional unique
+decoding algorithms. Implementations MAY employ list decoding algorithms (such as Sudan or Guruswami-Sudan) to
+attempt recovery from more than 16 errors, using the Blake3 hash of the decompressed data to disambiguate between
+candidate codewords. When list decoding succeeds beyond the traditional bound, implementations SHOULD indicate to
+the user that recovery was achieved with reduced confidence, as the mathematical uniqueness guarantee no longer applies.
 
 Reed-Solomon codes were chosen for their exceptional maturity and proven reliability. They have been successfully
 deployed for decades in CD/DVD error correction, QR codes, satellite communications, and RAID systems. The mathematics
@@ -262,9 +267,9 @@ are thoroughly understood and battle-tested implementations are available.
 1. Write header with appropriate configuration
 2. For each block of input data:
     - Compress the block with LZMA
-    - Write 4-byte size (little-endian)
+    - Write 8-byte size (little-endian)
     - Write compressed data
-3. Write end-of-blocks marker (0x00000000)
+3. Write end-of-blocks marker (0x0000000000000000)
 4. Calculate Blake3 hash of all uncompressed data
 5. Calculate Reed-Solomon parity of Blake3 hash
 6. Write trailer
@@ -275,8 +280,8 @@ are thoroughly understood and battle-tested implementations are available.
 2. Verify version compatibility
 3. Parse LZMA and filter configuration
 4. For each block until end-of-blocks marker:
-    - Read 4-byte size
-    - If size is 0x00000000, end block processing
+    - Read 8-byte size
+    - If size is 0x0000000000000000, end block processing
     - Decompress block data with LZMA
     - Append to output
 5. Compute Blake3 hash of decompressed data
@@ -287,7 +292,7 @@ are thoroughly understood and battle-tested implementations are available.
 To append data to an existing archive:
 
 1. Seek to final end-of-blocks marker
-2. Overwrite with new blocks
+2. Overwrite both the end-of-blocks marker AND the existing trailer with new blocks.
 3. Write new end-of-blocks marker
 4. Recalculate and write new trailer
 
@@ -397,7 +402,7 @@ attacks. A leading integrity check would detect truncation immediately.
 **Response**: While trailing metadata does have truncation vulnerability, our design mitigates this through multiple
 mechanisms:
 
-1. **End-of-blocks marker** (0x00000000) provides early truncation detection before reaching the trailer
+1. **End-of-blocks marker** (0x0000000000000000) provides early truncation detection before reaching the trailer
 2. **Reed-Solomon protection** specifically guards against trailer corruption, allowing recovery from up to 16 bytes of
    damage
 3. **Streaming requirement**: Leading checksums require either knowing the data size in advance or using chunked
@@ -550,20 +555,105 @@ specification.
 
 ### A.1 Minimal File
 
-Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 3) + no prefilter and no content:
+Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 2, dictionary size log2: 16) + no prefilter and no
+content:
 
 ```
-|fedcba98 01005d00 00000000 00000000| ......]......... 00000000
-|00000000 00000000 00000000 af1349b9| ..............I. 00000010
-|f5f9a1a6 a0404dea 36dcc949 9bcb25c9| .....@M.6..I..%. 00000020
-|adc112b7 cc9a93ca e41f3262 cedfc1cc| ..........2b.... 00000030
-|789afb17 6bf1fb71 a6756a5b 315bdbc2| x...k..q.uj[1[.. 00000040
-|322f987f f3aa7b0c 7c2a6a7d|          2/....{.|*j}     00000050
+|fedcba98 01005d00 00000000 00000000| 00000000
+|00000000 00000000 af1349b9 f5f9a1a6| 00000010
+|a0404dea 36dcc949 9bcb25c9 adc112b7| 00000020
+|cc9a93ca e41f3262 cedfc1cc 789afb17| 00000030
+|6bf1fb71 a6756a5b 315bdbc2 322f987f| 00000040
+|f3aa7b0c 7c2a6a7d                  | 00000050
+```
+
+Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 2, dictionary size log2: 30) + Delta prefilter
+(distance: 32) and one zero byte as content:
+
+```
+|fedcba98 01011f5d 0e0b0000 00000000| 00000000
+|00000041 fef7ffff e0008000 00000000| 00000010
+|00000000 01000000 00000000 2d3adedf| 00000020
+|f11b61f1 4c886e35 afa03673 6dcd87a7| 00000030
+|4d27b5c1 510225d0 f592e213 c213b18e| 00000040
+|a038cbd9 669481d7 382c07d1 0c82c200| 00000050
+|97993342 3a3340c2 48382018|          00000060
 ```
 
 ### A.2 Reed-Solomon Implementation
 
-The reference implementation provides a stack-only and efficient Reed-Solomon implementation in Rust.
+The reference implementation provides a stack-only and efficient Reed-Solomon
+implementation written in Rust, which code is in the public domain.
+
+#### A.2.1 - Test vectors
+
+Test 1:
+Data:    0000000000000000000000000000000000000000000000000000000000000000
+Parity:  0000000000000000000000000000000000000000000000000000000000000000
+
+Test 2:
+Data:    ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+Parity:  caabc74d87d23ad8a0a2bff5134bf7499e1b2859fb692e40b8d8e6fa8bfb5620
+
+Test 3:
+Data:    000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+Parity:  d8e4dab6534b241cb9afcb999503ec2d8c393a30f96e719970cee1d547f75acb
+
+Test 4:
+Data:    dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f
+Parity:  0e54d343ed7e6ffaf7e650525685934403006ad1428d2c9d0869b67b1920bea6
+
+Test 5:
+Data:    af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262
+Parity:  cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d
+
+#### A.2.2 - Minimal Python Implementation
+
+Using Python 3, numpy and galois:
+
+1. Import the libraries:
+    ```python
+    import galois
+    import numpy as np
+    ```
+
+2. Create the field with exact primitive polynomial:
+   ```python
+   GF = galois.GF(2**8, irreducible_poly=0x11d)
+   ```
+
+3. Verify primitive element is 2:
+   ```python
+   alpha = GF.primitive_element
+   assert alpha == 2
+   ```
+
+4. Build generator polynomial manually:
+   ```python
+   g = galois.Poly([1], field=GF)
+   x = galois.Poly([1, 0], field=GF)
+   for i in range(1, 33): # α^1 through α^32
+       g = g * (x - alpha**i)
+   ```
+
+5. Encode 32-byte data with systematic Reed-Solomon:
+   ```python
+
+    def rs_encode(data_bytes):
+        """Encode 32-byte data with Reed-Solomon protection."""
+        # Convert bytes to list for galois library
+        data_list = list(data_bytes)
+        data_gf = GF(data_list)
+        data_poly = galois.Poly(data_gf[::-1], field=GF)
+        shifted = data_poly * galois.Poly([1] + [0]*32, field=GF)
+        _, remainder = divmod(shifted, g)
+        parity_coeffs = remainder.coeffs[::-1] if remainder.degree >= 0 else []
+        parity = np.zeros(32, dtype=np.uint8)
+        parity[:len(parity_coeffs)] = [int(x) for x in parity_coeffs]
+        return bytes(data_bytes) + bytes(parity)  # [data || parity]
+   ```
+
+Note: Do NOT use galois.ReedSolomon(64, 32) as it expects primitive codes.
 
 ## Appendix B: Reference Implementation
 
@@ -575,4 +665,4 @@ Files using this format SHOULD use the extension `.slz`.
 
 ## Revision History
 
-- Version 0.1 (2025-08-12): Initial specification
+- Version 0.3 (2025-08-15): Initial specification
