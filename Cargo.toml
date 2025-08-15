@@ -23,8 +23,9 @@ blake3 = { version = "1", default-features = false, features = ["no_avx512"], op
 hex-literal = "1"
 
 [features]
-default = ["std", "optimization"]
+default = ["std", "optimization", "blake3"]
 # Uses the official release instead of the reference implementation
 blake3 = ["dep:blake3"]
 std = []
+# Activates some optimizations that can't express in safe Rust alone.
 optimization = ["std"]

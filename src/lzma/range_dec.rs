@@ -1,7 +1,8 @@
 use alloc::{vec, vec::Vec};
+use std::io::{BufRead, BufReader, Cursor, Write};
 
 use super::{BIT_MODEL_TOTAL_BITS, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS};
-use crate::{ByteReader, Read, error_eof, error_invalid_input};
+use crate::{ByteReader, Read, error_eof, error_invalid_data, error_invalid_input};
 
 pub(crate) struct RangeDecoder<R> {
     inner: R,
@@ -12,16 +13,6 @@ pub(crate) struct RangeDecoder<R> {
 impl<R> RangeDecoder<R> {
     pub(crate) fn into_inner(self) -> R {
         self.inner
-    }
-}
-
-impl RangeDecoder<RangeDecoderBuffer> {
-    pub(crate) fn new_buffer(size: usize) -> Self {
-        Self {
-            inner: RangeDecoderBuffer::new(size - 5),
-            code: 0,
-            range: 0,
-        }
     }
 }
 
@@ -330,50 +321,6 @@ impl<R: RangeReader> RangeDecoder<R> {
     }
 }
 
-pub(crate) struct RangeDecoderBuffer {
-    buf: Vec<u8>,
-    pos: usize,
-}
-
-impl RangeDecoder<RangeDecoderBuffer> {
-    pub(crate) fn prepare<R: Read + ByteReader>(
-        &mut self,
-        mut reader: R,
-        len: usize,
-    ) -> crate::Result<()> {
-        if len < 5 {
-            return Err(error_invalid_input("buffer len must >= 5"));
-        }
-
-        let b = reader.read_u8()?;
-        if b != 0x00 {
-            return Err(error_invalid_input("first byte is 0"));
-        }
-        self.code = reader.read_u32_be()?;
-
-        self.range = 0xFFFFFFFFu32;
-        let len = len - 5;
-        let pos = self.inner.buf.len() - len;
-        let end = pos + len;
-        self.inner.pos = pos;
-        reader.read_exact(&mut self.inner.buf[pos..end])
-    }
-
-    #[inline]
-    pub(crate) fn is_finished(&self) -> bool {
-        self.inner.pos == self.inner.buf.len() && self.code == 0
-    }
-}
-
-impl RangeDecoderBuffer {
-    pub(crate) fn new(len: usize) -> Self {
-        Self {
-            buf: vec![0; len],
-            pos: len,
-        }
-    }
-}
-
 pub(crate) trait RangeReader {
     fn read_u8(&mut self) -> u8;
 
@@ -402,57 +349,166 @@ pub(crate) trait RangeReader {
     }
 }
 
-impl<T: Read> RangeReader for T {
-    #[inline(always)]
-    fn read_u8(&mut self) -> u8 {
-        // Out of bound reads return an 1, which is fine, since this
-        // will let the decoder error out with a "dist overflow" error.
-        // Not returning an error results in code that can be better
-        // optimized in the hot path and overall 10% better decoding
-        // performance.
-        let mut buf = [0; 1];
-        match self.read_exact(&mut buf) {
-            Ok(_) => buf[0],
-            Err(_) => 1,
+// TODO We should benchmark this change in the lzma crate and see, if it improves the speed.
+const BUFFER_SIZE: usize = 64 * 1024;
+const REFILL_THRESHOLD: usize = 4096;
+
+pub(crate) struct BufferedReader<R> {
+    reader: R,
+    buffer: Vec<u8>,
+    /// Current read position in buffer
+    pos: usize,
+    /// How much of buffer contains valid data
+    filled: usize,
+    /// Whether underlying reader reached EOF
+    eof: bool,
+}
+
+impl<R: Read> BufferedReader<R> {
+    pub(crate) fn new(mut reader: R) -> crate::Result<Self> {
+        let mut buffer = vec![0u8; BUFFER_SIZE];
+        let mut filled = 0;
+        let mut eof = false;
+
+        // Fill initial buffer.
+        while filled < BUFFER_SIZE {
+            match reader.read(&mut buffer[filled..]) {
+                Ok(0) => {
+                    eof = true;
+                    break;
+                }
+                Ok(n) => filled += n,
+                Err(e) => return Err(e),
+            }
         }
+
+        if filled == 0 {
+            return Err(error_invalid_data("no data available"));
+        }
+
+        // Resize buffer to actual content if we read less than capacity.
+        if eof && filled < BUFFER_SIZE {
+            buffer.truncate(filled);
+        }
+
+        Ok(Self {
+            reader,
+            buffer,
+            pos: 0,
+            filled,
+            eof,
+        })
     }
 
-    fn try_read_u8(&mut self) -> crate::Result<u8> {
-        let mut buf = [0; 1];
-        self.read_exact(&mut buf)?;
-        Ok(buf[0])
+    pub(crate) fn into_inner(self) -> R {
+        self.reader
     }
 
+    /// Ensures at least min_bytes are available starting from current position.
+    fn ensure_available(&mut self, min_bytes: usize) -> crate::Result<()> {
+        let available = self.filled.saturating_sub(self.pos);
+
+        if available >= min_bytes {
+            // Already have enough data.
+            return Ok(());
+        }
+
+        if self.eof {
+            // Can't read more, work with what we have.
+            return Ok(());
+        }
+
+        // Need to refill buffer.
+        self.refill_buffer()
+    }
+
+    /// Refills the buffer, compacting if necessary
+    fn refill_buffer(&mut self) -> crate::Result<()> {
+        if self.eof {
+            return Ok(());
+        }
+
+        // If we've consumed more than half the buffer, compact it.
+        if self.pos > BUFFER_SIZE / 2 {
+            let remaining = self.filled - self.pos;
+            if remaining > 0 {
+                // Move unread data to the beginning
+                self.buffer.copy_within(self.pos..self.filled, 0);
+            }
+            self.filled = remaining;
+            self.pos = 0;
+        }
+
+        // Try to fill the rest with the buffer
+        while self.filled < self.buffer.len() {
+            match self.reader.read(&mut self.buffer[self.filled..]) {
+                Ok(0) => {
+                    self.eof = true;
+                    break;
+                }
+                Ok(n) => self.filled += n,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Proactively refill buffer if approaching the end.
     #[inline(always)]
-    fn read_u32_be(&mut self) -> crate::Result<u32> {
-        let mut buf = [0; 4];
-        self.read_exact(buf.as_mut())?;
-        Ok(u32::from_be_bytes(buf))
+    fn maybe_refill(&mut self) -> crate::Result<()> {
+        let remaining = self.filled.saturating_sub(self.pos);
+        if remaining < REFILL_THRESHOLD && !self.eof {
+            self.refill_buffer()
+        } else {
+            Ok(())
+        }
     }
 }
 
-impl RangeReader for RangeDecoderBuffer {
+impl<R: Read> RangeReader for BufferedReader<R> {
     #[inline(always)]
     fn read_u8(&mut self) -> u8 {
-        // Out of bound reads return an 1, which is fine, since this
-        // will let the decoder error out with a "dist overflow" error.
-        // Not returning an error results in code that can be better
-        // optimized in the hot path and overall 10% better decoding
-        // performance.
-        let byte = *self.buf.get(self.pos).unwrap_or(&1);
-        self.pos += 1;
-        byte
+        // Proactively refill if approaching buffer end.
+        let _ = self.maybe_refill();
+
+        if self.pos < self.filled {
+            let byte = self.buffer[self.pos];
+            self.pos += 1;
+            byte
+        } else {
+            // Out of bound reads return 1, which will cause dist overflow error.
+            1
+        }
     }
 
+    #[inline(always)]
     fn try_read_u8(&mut self) -> crate::Result<u8> {
-        self.buf.get(self.pos).copied().ok_or_else(error_eof)
+        // Ensure we have at least 1 byte available.
+        self.ensure_available(1)?;
+
+        if self.pos < self.filled {
+            let byte = self.buffer[self.pos];
+            self.pos += 1;
+            Ok(byte)
+        } else {
+            Err(error_eof())
+        }
     }
 
     #[inline(always)]
     fn read_u32_be(&mut self) -> crate::Result<u32> {
-        let b = u32::from_be_bytes(self.buf[self.pos..self.pos + 4].try_into().unwrap());
-        self.pos += 4;
-        Ok(b)
+        // Ensure we have at least 4 bytes available
+        self.ensure_available(4)?;
+
+        if self.pos + 4 <= self.filled {
+            let bytes = &self.buffer[self.pos..self.pos + 4];
+            let value = u32::from_be_bytes(bytes.try_into().unwrap());
+            self.pos += 4;
+            Ok(value)
+        } else {
+            Err(error_eof())
+        }
     }
 
     #[inline(always)]
@@ -472,6 +528,6 @@ impl RangeReader for RangeDecoderBuffer {
 
     #[inline(always)]
     fn buf(&self) -> &[u8] {
-        self.buf.as_slice()
+        &self.buffer[..self.filled]
     }
 }

@@ -1,5 +1,11 @@
+use alloc::{vec, vec::Vec};
+use std::io::BufReader;
+
 use super::{DICT_SIZE_MAX, decoder::LZMADecoder, lz::LZDecoder, range_dec::RangeDecoder};
-use crate::{ByteReader, Read, error_invalid_data, error_invalid_input, error_out_of_memory};
+use crate::{
+    ByteReader, Read, error_invalid_data, error_invalid_input, error_out_of_memory,
+    lzma::range_dec::BufferedReader,
+};
 
 /// Calculates the memory usage in KiB required for LZMA decompression from properties byte.
 pub fn get_memory_usage_by_props(dict_size: u32, props_byte: u8) -> crate::Result<u32> {
@@ -34,17 +40,17 @@ fn get_dict_size(dict_size: u32) -> crate::Result<u32> {
 /// A single-threaded LZMA decompressor.
 pub struct LZMAReader<R> {
     lz: LZDecoder,
-    rc: RangeDecoder<R>,
+    rc: RangeDecoder<BufferedReader<R>>,
     lzma: LZMADecoder,
     end_reached: bool,
     relaxed_end_cond: bool,
     remaining_size: u64,
 }
 
-impl<R> LZMAReader<R> {
+impl<R: Read> LZMAReader<R> {
     /// Unwraps the reader, returning the underlying reader.
     pub fn into_inner(self) -> R {
-        self.rc.into_inner()
+        self.rc.into_inner().into_inner()
     }
 }
 
@@ -93,7 +99,8 @@ impl<R: Read> LZMAReader<R> {
         if uncomp_size <= u64::MAX / 2 && dict_size as u64 > uncomp_size {
             dict_size = get_dict_size(uncomp_size as u32)?;
         }
-        let rc = RangeDecoder::new_stream(reader);
+        let buffered_reader = BufferedReader::new(reader)?;
+        let rc = RangeDecoder::new_stream(buffered_reader);
         let rc = match rc {
             Ok(r) => r,
             Err(e) => {
@@ -103,7 +110,6 @@ impl<R: Read> LZMAReader<R> {
         let lz = LZDecoder::new(get_dict_size(dict_size)? as _, preset_dict);
         let lzma = LZMADecoder::new(lc, lp, pb);
         Ok(Self {
-            // reader,
             lz,
             rc,
             lzma,
