@@ -1,13 +1,15 @@
 use std::{
     fs::{self, File},
-    io::{self, BufReader, BufWriter, Result, Write},
+    io::{self, BufReader, BufWriter, Read, Result, Write},
     num::NonZeroU64,
     process,
     time::Instant,
 };
 
 use clap::{Arg, ArgMatches, Command, value_parser};
-use slz::{Prefilter, SLZMetadata, SLZOptions, SLZStreamingReader, SLZStreamingWriter};
+use slz::{
+    BufferedReader, Prefilter, SLZMetadata, SLZOptions, SLZStreamingReader, SLZStreamingWriter,
+};
 
 struct Cli {
     input: String,
@@ -352,10 +354,10 @@ fn main() -> Result<()> {
 
 fn compress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::Duration)> {
     let input_file = File::open(&cli.input)?;
-    let mut input_reader = BufReader::new(input_file);
+    let mut input_reader = BufReader::with_capacity(65536, input_file);
 
     let output_file = File::create(output_path)?;
-    let output_writer = BufWriter::new(output_file);
+    let output_writer = BufWriter::with_capacity(65536, output_file);
 
     let mut options = SLZOptions::from_preset(cli.preset);
 
@@ -381,10 +383,22 @@ fn compress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::D
     let mut slz_writer = SLZStreamingWriter::new(output_writer, options);
 
     let start_time = Instant::now();
-    let bytes_read = io::copy(&mut input_reader, &mut slz_writer)?;
-    let elapsed = start_time.elapsed();
 
+    let mut buffer = vec![0u8; 65536];
+    let mut bytes_read = 0u64;
+
+    loop {
+        match input_reader.read(&mut buffer)? {
+            0 => break,
+            n => {
+                slz_writer.write_all(&buffer[..n])?;
+                bytes_read += n as u64;
+            }
+        }
+    }
     slz_writer.finish()?;
+
+    let elapsed = start_time.elapsed();
 
     let compressed_size = fs::metadata(output_path)?.len();
 
@@ -393,23 +407,33 @@ fn compress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::D
 
 fn decompress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::Duration)> {
     let input_file = File::open(&cli.input)?;
+    let compressed_size = input_file.metadata()?.len();
 
-    let input_reader = BufReader::new(input_file);
+    let reader = BufferedReader::new(input_file)?;
+    let mut slz_reader = SLZStreamingReader::new(reader, true);
+
     let output_file = File::create(output_path)?;
-    let mut output_writer = BufWriter::new(output_file);
-
-    let mut slz_reader = SLZStreamingReader::new(input_reader, true);
+    let mut output_writer = BufWriter::with_capacity(65536, output_file);
 
     let start_time = Instant::now();
-    let bytes_written = io::copy(&mut slz_reader, &mut output_writer)?;
-    let elapsed = start_time.elapsed();
+
+    let mut buffer = vec![0u8; 65536];
+    let mut total_written = 0u64;
+
+    loop {
+        match slz_reader.read(&mut buffer)? {
+            0 => break,
+            n => {
+                output_writer.write_all(&buffer[..n])?;
+                total_written += n as u64;
+            }
+        }
+    }
 
     output_writer.flush()?;
+    let elapsed = start_time.elapsed();
 
-    let inner = slz_reader.into_inner().into_inner();
-    let compressed_size = inner.metadata()?.len();
-
-    Ok((compressed_size, bytes_written, elapsed))
+    Ok((compressed_size, total_written, elapsed))
 }
 
 fn remove_input_file(input_path: &str) -> Result<()> {

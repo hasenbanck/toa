@@ -2,9 +2,8 @@ use alloc::{vec, vec::Vec};
 
 use super::{
     ALIGN_BITS, DIST_MODEL_END, DIST_MODEL_START, LOW_SYMBOLS, LZMACoder, LengthCoder,
-    LiteralCoder, LiteralSubCoder, MATCH_LEN_MIN, MID_SYMBOLS, coder_get_dict_size,
-    lz::LZDecoder,
-    range_dec::{RangeDecoder, RangeReader},
+    LiteralCoder, LiteralSubCoder, MATCH_LEN_MIN, MID_SYMBOLS, coder_get_dict_size, lz::LZDecoder,
+    optimized_reader::OptimizedReader, range_dec::RangeDecoder,
 };
 
 pub(crate) struct LZMADecoder {
@@ -47,7 +46,7 @@ impl LZMADecoder {
         self.coder.reps[0] == -1
     }
 
-    pub(crate) fn decode<R: RangeReader>(
+    pub(crate) fn decode<R: OptimizedReader>(
         &mut self,
         lz: &mut LZDecoder,
         rc: &mut RangeDecoder<R>,
@@ -74,7 +73,11 @@ impl LZMADecoder {
         Ok(())
     }
 
-    fn decode_match<R: RangeReader>(&mut self, pos_state: u32, rc: &mut RangeDecoder<R>) -> u32 {
+    fn decode_match<R: OptimizedReader>(
+        &mut self,
+        pos_state: u32,
+        rc: &mut RangeDecoder<R>,
+    ) -> u32 {
         self.coder.state.update_match();
         self.coder.reps[3] = self.coder.reps[2];
         self.coder.reps[2] = self.coder.reps[1];
@@ -104,7 +107,7 @@ impl LZMADecoder {
         len as _
     }
 
-    fn decode_rep_match<R: RangeReader>(
+    fn decode_rep_match<R: OptimizedReader>(
         &mut self,
         pos_state: u32,
         rc: &mut RangeDecoder<R>,
@@ -161,7 +164,7 @@ impl LiteralDecoder {
         }
     }
 
-    fn decode<R: RangeReader>(
+    fn decode<R: OptimizedReader>(
         &mut self,
         coder: &mut LZMACoder,
         lz: &mut LZDecoder,
@@ -187,7 +190,7 @@ impl LiteralSubDecoder {
         }
     }
 
-    pub(crate) fn decode<R: RangeReader>(
+    pub(crate) fn decode<R: OptimizedReader>(
         &mut self,
         coder: &mut LZMACoder,
         lz: &mut LZDecoder,
@@ -229,7 +232,7 @@ impl LiteralSubDecoder {
 }
 
 impl LengthCoder {
-    fn decode<R: RangeReader>(&mut self, pos_state: usize, rc: &mut RangeDecoder<R>) -> i32 {
+    fn decode<R: OptimizedReader>(&mut self, pos_state: usize, rc: &mut RangeDecoder<R>) -> i32 {
         if rc.decode_bit(&mut self.choice[0]) == 0 {
             return rc
                 .decode_bit_tree(&mut self.low[pos_state])

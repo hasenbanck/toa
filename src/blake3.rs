@@ -1,7 +1,5 @@
-//! This is the reference implementation of BLAKE3. It is used for testing and
-//! as a readable example of the algorithms involved. Section 5.1 of [the BLAKE3
-//! spec](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf)
-//! discusses this implementation.
+//! This is the reference implementation of BLAKE3. It's a hard copy as a fallback if the brake3
+//! crate doesn't compile or can't tbe compiled on an exotic target.
 //!
 //!
 //! ## License

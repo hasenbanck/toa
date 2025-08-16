@@ -1,5 +1,7 @@
 mod streaming_reader;
 
+use std::io::Seek;
+
 pub use streaming_reader::SLZStreamingReader;
 
 use crate::{
@@ -8,6 +10,7 @@ use crate::{
     lzma::{
         filter::{bcj::BCJReader, delta::DeltaReader},
         lzma_reader::LZMAReader,
+        optimized_reader::OptimizedReader,
     },
     reed_solomon::decode,
 };
@@ -15,19 +18,19 @@ use crate::{
 /// All possible reader combinations.
 #[allow(clippy::large_enum_variant)]
 enum Reader<R> {
-    Lzma(LZMAReader<BlockReader<R>>),
-    Delta(DeltaReader<LZMAReader<BlockReader<R>>>),
-    BcjX86(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjArm(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjArmThumb(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjArm64(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjSparc(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjPowerPc(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjIa64(BCJReader<LZMAReader<BlockReader<R>>>),
-    BcjRiscV(BCJReader<LZMAReader<BlockReader<R>>>),
+    Lzma(LZMAReader<R>),
+    Delta(DeltaReader<LZMAReader<R>>),
+    BcjX86(BCJReader<LZMAReader<R>>),
+    BcjArm(BCJReader<LZMAReader<R>>),
+    BcjArmThumb(BCJReader<LZMAReader<R>>),
+    BcjArm64(BCJReader<LZMAReader<R>>),
+    BcjSparc(BCJReader<LZMAReader<R>>),
+    BcjPowerPc(BCJReader<LZMAReader<R>>),
+    BcjIa64(BCJReader<LZMAReader<R>>),
+    BcjRiscV(BCJReader<LZMAReader<R>>),
 }
 
-impl<R: Read> Read for Reader<R> {
+impl<R: OptimizedReader> Read for Reader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self {
             Reader::Lzma(reader) => reader.read(buf),
@@ -44,10 +47,10 @@ impl<R: Read> Read for Reader<R> {
     }
 }
 
-impl<R: Read> Reader<R> {
+impl<R: OptimizedReader> Reader<R> {
     /// Create a new reader chain based on the header configuration.
     fn new(
-        block_reader: BlockReader<R>,
+        reader: R,
         prefilter: Prefilter,
         lc: u8,
         lp: u8,
@@ -55,7 +58,7 @@ impl<R: Read> Reader<R> {
         dict_size: u32,
     ) -> Result<Self> {
         let lzma_reader = LZMAReader::new(
-            block_reader,
+            reader,
             u64::MAX,
             lc as u32,
             lp as u32,
@@ -84,48 +87,16 @@ impl<R: Read> Reader<R> {
     /// Extract the inner reader from the reader chain.
     fn into_inner(self) -> R {
         match self {
-            Reader::Lzma(reader) => reader.into_inner().into_inner(),
-            Reader::Delta(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjX86(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjArm(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjArmThumb(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjArm64(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjSparc(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjPowerPc(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjIa64(reader) => reader.into_inner().into_inner().into_inner(),
-            Reader::BcjRiscV(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::Lzma(reader) => reader.into_inner(),
+            Reader::Delta(reader) => reader.into_inner().into_inner(),
+            Reader::BcjX86(reader) => reader.into_inner().into_inner(),
+            Reader::BcjArm(reader) => reader.into_inner().into_inner(),
+            Reader::BcjArmThumb(reader) => reader.into_inner().into_inner(),
+            Reader::BcjArm64(reader) => reader.into_inner().into_inner(),
+            Reader::BcjSparc(reader) => reader.into_inner().into_inner(),
+            Reader::BcjPowerPc(reader) => reader.into_inner().into_inner(),
+            Reader::BcjIa64(reader) => reader.into_inner().into_inner(),
+            Reader::BcjRiscV(reader) => reader.into_inner().into_inner(),
         }
-    }
-}
-
-/// A reader that limits reading to a specific number of bytes from the underlying reader.
-pub struct BlockReader<R> {
-    inner: R,
-    remaining: u64,
-}
-
-impl<R> BlockReader<R> {
-    fn new(inner: R, size: u64) -> Self {
-        Self {
-            inner,
-            remaining: size,
-        }
-    }
-
-    fn into_inner(self) -> R {
-        self.inner
-    }
-}
-
-impl<R: Read> Read for BlockReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if self.remaining == 0 {
-            return Ok(0);
-        }
-
-        let to_read = buf.len().min(self.remaining as usize);
-        let bytes_read = self.inner.read(&mut buf[..to_read])?;
-        self.remaining -= bytes_read as u64;
-        Ok(bytes_read)
     }
 }

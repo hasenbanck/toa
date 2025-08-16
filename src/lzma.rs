@@ -10,12 +10,18 @@ pub(crate) mod enc;
 pub mod filter;
 pub(crate) mod lz;
 pub(crate) mod lzma_reader;
+pub mod optimized_reader;
 pub(crate) mod range_dec;
 pub(crate) mod state;
 
+use std::io::Read;
+
 pub use enc::{EncodeMode, LZMAOptions, LZMAWriter, get_extra_size_before};
 
-use crate::lzma::state::{STATES, State};
+use crate::{
+    error_eof, error_invalid_data,
+    lzma::state::{STATES, State},
+};
 
 /// The minimal size of a dictionary.
 pub const DICT_SIZE_MIN: u32 = 4096;

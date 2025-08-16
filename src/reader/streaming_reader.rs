@@ -1,12 +1,13 @@
 use alloc::vec::Vec;
 
-use super::{BlockReader, Reader};
+use super::Reader;
 use crate::{
     ByteReader, Prefilter, Read, Result, SLZ_MAGIC, SLZ_VERSION, SLZHeader, SLZTrailer, blake3,
     error_invalid_data, error_unsupported,
     lzma::{
         filter::{bcj::BCJReader, delta::DeltaReader},
         lzma_reader::LZMAReader,
+        optimized_reader::OptimizedReader,
     },
     reed_solomon::decode,
 };
@@ -23,7 +24,7 @@ pub struct SLZStreamingReader<R> {
     validate_trailer: bool,
 }
 
-impl<R: Read> SLZStreamingReader<R> {
+impl<R: OptimizedReader> SLZStreamingReader<R> {
     /// Create a new SLZ reader.
     pub fn new(inner: R, validate_trailer: bool) -> Self {
         Self {
@@ -62,12 +63,9 @@ impl<R: Read> SLZStreamingReader<R> {
             .header
             .ok_or_else(|| error_invalid_data("header not read"))?;
 
-        // Create a limited reader for this block.
-        let block_reader = BlockReader::new(inner, block_size);
-
         // Create the reader chain.
         let reader = Reader::new(
-            block_reader,
+            inner,
             header.prefilter,
             header.lc,
             header.lp,
@@ -122,7 +120,7 @@ impl<R: Read> SLZStreamingReader<R> {
     }
 }
 
-impl<R: Read> Read for SLZStreamingReader<R> {
+impl<R: OptimizedReader> Read for SLZStreamingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -178,11 +176,17 @@ impl<R: Read> Read for SLZStreamingReader<R> {
 #[cfg(feature = "std")]
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Write};
+    use std::{
+        io::{Cursor, Write},
+        ops::Deref,
+    };
 
     use super::*;
     use crate::{
-        lzma::EncodeMode,
+        lzma::{
+            EncodeMode,
+            optimized_reader::{IoReader, SliceReader},
+        },
         writer::{SLZOptions, SLZStreamingWriter},
     };
 
@@ -194,7 +198,8 @@ mod tests {
         let writer = SLZStreamingWriter::new(Cursor::new(&mut compressed), options);
         writer.finish().unwrap();
 
-        let mut reader = SLZStreamingReader::new(Cursor::new(&compressed), true);
+        let slice_reader = SliceReader::new(compressed.deref());
+        let mut reader = SLZStreamingReader::new(slice_reader, true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 
@@ -211,7 +216,8 @@ mod tests {
         writer.write_all(original_data).unwrap();
         writer.finish().unwrap();
 
-        let mut reader = SLZStreamingReader::new(Cursor::new(&compressed), true);
+        let io_reader = IoReader::new(compressed.deref());
+        let mut reader = SLZStreamingReader::new(io_reader, true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 

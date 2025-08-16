@@ -1,11 +1,11 @@
 use alloc::{vec, vec::Vec};
 use std::io::BufReader;
 
-use super::{DICT_SIZE_MAX, decoder::LZMADecoder, lz::LZDecoder, range_dec::RangeDecoder};
-use crate::{
-    ByteReader, Read, error_invalid_data, error_invalid_input, error_out_of_memory,
-    lzma::range_dec::BufferedReader,
+use super::{
+    DICT_SIZE_MAX, decoder::LZMADecoder, lz::LZDecoder, optimized_reader::OptimizedReader,
+    range_dec::RangeDecoder,
 };
+use crate::{error_invalid_data, error_invalid_input, error_out_of_memory};
 
 /// Calculates the memory usage in KiB required for LZMA decompression from properties byte.
 pub fn get_memory_usage_by_props(dict_size: u32, props_byte: u8) -> crate::Result<u32> {
@@ -40,21 +40,21 @@ fn get_dict_size(dict_size: u32) -> crate::Result<u32> {
 /// A single-threaded LZMA decompressor.
 pub struct LZMAReader<R> {
     lz: LZDecoder,
-    rc: RangeDecoder<BufferedReader<R>>,
+    rc: RangeDecoder<R>,
     lzma: LZMADecoder,
     end_reached: bool,
     relaxed_end_cond: bool,
     remaining_size: u64,
 }
 
-impl<R: Read> LZMAReader<R> {
+impl<R: OptimizedReader> LZMAReader<R> {
     /// Unwraps the reader, returning the underlying reader.
     pub fn into_inner(self) -> R {
-        self.rc.into_inner().into_inner()
+        self.rc.into_inner()
     }
 }
 
-impl<R: Read> LZMAReader<R> {
+impl<R: OptimizedReader> LZMAReader<R> {
     fn construct1(
         reader: R,
         uncomp_size: u64,
@@ -99,8 +99,8 @@ impl<R: Read> LZMAReader<R> {
         if uncomp_size <= u64::MAX / 2 && dict_size as u64 > uncomp_size {
             dict_size = get_dict_size(uncomp_size as u32)?;
         }
-        let buffered_reader = BufferedReader::new(reader)?;
-        let rc = RangeDecoder::new_stream(buffered_reader);
+
+        let rc = RangeDecoder::new_stream(reader);
         let rc = match rc {
             Ok(r) => r,
             Err(e) => {
@@ -127,10 +127,10 @@ impl<R: Read> LZMAReader<R> {
         mem_limit_kb: u32,
         preset_dict: Option<&[u8]>,
     ) -> crate::Result<Self> {
-        let props = reader.read_u8()?;
-        let dict_size = reader.read_u32()?;
+        let props = reader.try_read_u8()?;
+        let dict_size = reader.try_read_u32()?;
 
-        let uncomp_size = reader.read_u64()?;
+        let uncomp_size = reader.try_read_u64()?;
         let need_mem = get_memory_usage_by_props(dict_size, props)?;
         if mem_limit_kb < need_mem {
             return Err(error_out_of_memory(
@@ -228,7 +228,7 @@ impl<R: Read> LZMAReader<R> {
     }
 }
 
-impl<R: Read> Read for LZMAReader<R> {
+impl<R: OptimizedReader> crate::Read for LZMAReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
         self.read_decode(buf)
     }

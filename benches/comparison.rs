@@ -1,11 +1,12 @@
 use std::{
     hint::black_box,
     io::{Read, Write},
+    ops::Deref,
 };
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use liblzma::{bufread::*, stream::*};
-use slz::{SLZOptions, SLZStreamingReader, SLZStreamingWriter};
+use liblzma::bufread::*;
+use slz::{SLZOptions, SLZStreamingReader, SLZStreamingWriter, SliceReader};
 
 static TEST_DATA: &[u8] = include_bytes!("../tests/data/executable.exe");
 
@@ -79,8 +80,10 @@ fn bench_decompression(c: &mut Criterion) {
             |b, compressed| {
                 b.iter(|| {
                     let mut uncompressed = Vec::new();
-                    let mut reader =
-                        SLZStreamingReader::new(black_box(compressed.as_slice()), false);
+                    let mut reader = SLZStreamingReader::new(
+                        black_box(SliceReader::new(compressed.deref())),
+                        true,
+                    );
                     reader
                         .read_to_end(black_box(&mut uncompressed))
                         .expect("read_to_end failed");
@@ -95,9 +98,7 @@ fn bench_decompression(c: &mut Criterion) {
             |b, compressed| {
                 b.iter(|| {
                     let mut uncompressed = Vec::new();
-                    let stream =
-                        Stream::new_auto_decoder(u64::MAX, 0).expect("new auto decoder failed");
-                    let mut r = XzDecoder::new_stream(black_box(compressed.as_slice()), stream);
+                    let mut r = XzDecoder::new(black_box(compressed.as_slice()));
                     r.read_to_end(black_box(&mut uncompressed))
                         .expect("read_to_end failed");
                     black_box(uncompressed)

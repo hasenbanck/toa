@@ -31,6 +31,7 @@ pub(crate) use std::io::{Seek, SeekFrom};
 #[cfg(feature = "blake3")]
 pub use blake3;
 use header::SLZHeader;
+pub use lzma::optimized_reader::*;
 pub use metadata::SLZMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;
