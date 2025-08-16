@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use super::Reader;
 use crate::{
-    ByteReader, Prefilter, Read, Result, SLZ_MAGIC, SLZ_VERSION, SLZHeader, SLZTrailer, blake3,
+    ByteReader, Prefilter, Read, Result, SLZ_MAGIC, SLZ_VERSION, SLZHeader, SLZTrailer,
     error_invalid_data, error_unsupported,
     lzma::{
         filter::{bcj::BCJReader, delta::DeltaReader},
@@ -95,18 +95,8 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
 
         let trailer = SLZTrailer::parse(inner)?;
 
-        let computed_bytes;
-
-        #[cfg(not(feature = "blake3"))]
-        {
-            computed_bytes = self.hasher.finalize();
-        }
-
-        #[cfg(feature = "blake3")]
-        {
-            let computed_hash = self.hasher.finalize();
-            computed_bytes = *computed_hash.as_bytes();
-        }
+        let computed_hash = self.hasher.finalize();
+        let computed_bytes = *computed_hash.as_bytes();
 
         trailer.verify(self.validate_trailer, &computed_bytes)
     }

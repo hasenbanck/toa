@@ -4,8 +4,6 @@
 
 extern crate alloc;
 
-#[cfg(not(feature = "blake3"))]
-pub(crate) mod blake3;
 mod lzma;
 mod reader;
 pub mod reed_solomon;
@@ -28,8 +26,6 @@ pub(crate) use std::io::Write;
 #[cfg(feature = "std")]
 pub(crate) use std::io::{Seek, SeekFrom};
 
-#[cfg(feature = "blake3")]
-pub use blake3;
 use header::SLZHeader;
 pub use lzma::optimized_reader::*;
 pub use metadata::SLZMetadata;

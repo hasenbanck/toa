@@ -17,7 +17,7 @@ required-features = ["std"]
 
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std", "help"] }
-blake3 = { version = "1", optional = true }
+blake3 = { version = "1" }
 
 [dev-dependencies]
 hex-literal = "1"
@@ -25,9 +25,7 @@ criterion = { version = "0.7", features = ["html_reports"] }
 liblzma = { version = "0.4", features = ["static"] }
 
 [features]
-default = ["std", "optimization", "blake3"]
-# Uses the official release instead of the reference implementation.
-blake3 = ["dep:blake3"]
+default = ["std", "optimization"]
 # Used to support std. Deactivating this feature makes this crate no_std compatible.
 std = []
 # Activates some optimizations that can't express in safe Rust alone.

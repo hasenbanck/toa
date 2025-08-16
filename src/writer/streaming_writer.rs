@@ -2,8 +2,7 @@ use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 
 use crate::{
-    ByteWriter, Prefilter, Result, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, blake3,
-    error_invalid_data,
+    ByteWriter, Prefilter, Result, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
     header::SLZHeader,
     lzma::{
         DICT_SIZE_MAX, LZMAOptions, LZMAWriter,
@@ -184,18 +183,8 @@ impl<W: Write> SLZStreamingWriter<W> {
     }
 
     fn write_trailer(&mut self) -> Result<()> {
-        let computed_bytes;
-
-        #[cfg(not(feature = "blake3"))]
-        {
-            computed_bytes = self.hasher.finalize();
-        }
-
-        #[cfg(feature = "blake3")]
-        {
-            let computed_hash = self.hasher.finalize();
-            computed_bytes = *computed_hash.as_bytes();
-        }
+        let computed_hash = self.hasher.finalize();
+        let computed_bytes = *computed_hash.as_bytes();
 
         let trailer = SLZTrailer::new(self.uncompressed_size, computed_bytes);
         trailer.write(&mut self.inner)
