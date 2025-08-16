@@ -1,5 +1,8 @@
 use alloc::{vec, vec::Vec};
-use std::io::{BufRead, BufReader, Cursor, Write};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader, Cursor, Write},
+};
 
 use super::{BIT_MODEL_TOTAL_BITS, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS};
 use crate::{ByteReader, Read, error_eof, error_invalid_data, error_invalid_input};
@@ -349,7 +352,52 @@ pub(crate) trait RangeReader {
     }
 }
 
-// TODO We should benchmark this change in the lzma crate and see, if it improves the speed.
+struct IoReader<R: Read>(R);
+
+impl<R: Read> IoReader<R> {
+    #[inline(always)]
+    pub(crate) fn new(reader: R) -> IoReader<R> {
+        Self(reader)
+    }
+}
+
+impl<R: Read> Read for IoReader<R> {
+    #[inline(always)]
+    fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl<R: Read> RangeReader for IoReader<R> {
+    #[inline(always)]
+    fn read_u8(&mut self) -> u8 {
+        // Out of bound reads return an 1, which is fine, since this
+        // will let the decoder error out with a "dist overflow" error.
+        // Not returning an error results in code that can be better
+        // optimized in the hot path and overall 10% better decoding
+        // performance.
+        let mut buf = [0; 1];
+        match self.read_exact(&mut buf) {
+            Ok(_) => buf[0],
+            Err(_) => 1,
+        }
+    }
+
+    #[inline(always)]
+    fn try_read_u8(&mut self) -> crate::Result<u8> {
+        let mut buf = [0; 1];
+        self.read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+
+    #[inline(always)]
+    fn read_u32_be(&mut self) -> crate::Result<u32> {
+        let mut buf = [0; 4];
+        self.read_exact(buf.as_mut())?;
+        Ok(u32::from_be_bytes(buf))
+    }
+}
+
 const BUFFER_SIZE: usize = 64 * 1024;
 const REFILL_THRESHOLD: usize = 4096;
 

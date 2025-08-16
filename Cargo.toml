@@ -21,11 +21,22 @@ blake3 = { version = "1", default-features = false, features = ["no_avx512"], op
 
 [dev-dependencies]
 hex-literal = "1"
+criterion = { version = "0.7", features = ["html_reports"] }
+liblzma = { version = "0.4", features = ["static"] }
 
 [features]
 default = ["std", "optimization", "blake3"]
-# Uses the official release instead of the reference implementation
+# Uses the official release instead of the reference implementation.
 blake3 = ["dep:blake3"]
+# Used to support std. Deactivating this feature makes this crate no_std compatible.
 std = []
 # Activates some optimizations that can't express in safe Rust alone.
 optimization = ["std"]
+
+[[bench]]
+name = "comparison"
+harness = false
+
+[package.metadata.docs.rs]
+features = ["blake3", "std", "optimization"]
+rustdoc-args = ["--cfg", "docsrs"]
