@@ -25,7 +25,7 @@ impl<R: RangeReader> RangeDecoder<R> {
         if b != 0x00 {
             return Err(error_invalid_input("range decoder first byte is not zero"));
         }
-        let code = inner.read_u32_be()?;
+        let code = inner.try_read_u32_be()?;
         Ok(Self {
             inner,
             code,
@@ -329,7 +329,7 @@ pub(crate) trait RangeReader {
 
     fn try_read_u8(&mut self) -> crate::Result<u8>;
 
-    fn read_u32_be(&mut self) -> crate::Result<u32>;
+    fn try_read_u32_be(&mut self) -> crate::Result<u32>;
 
     #[inline(always)]
     fn is_buffer(&self) -> bool {
@@ -356,7 +356,7 @@ struct IoReader<R: Read>(R);
 
 impl<R: Read> IoReader<R> {
     #[inline(always)]
-    pub(crate) fn new(reader: R) -> IoReader<R> {
+    pub(crate) fn new(reader: R) -> Self {
         Self(reader)
     }
 }
@@ -391,10 +391,91 @@ impl<R: Read> RangeReader for IoReader<R> {
     }
 
     #[inline(always)]
-    fn read_u32_be(&mut self) -> crate::Result<u32> {
+    fn try_read_u32_be(&mut self) -> crate::Result<u32> {
         let mut buf = [0; 4];
         self.read_exact(buf.as_mut())?;
         Ok(u32::from_be_bytes(buf))
+    }
+}
+
+struct SliceReader<'a> {
+    slice: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> SliceReader<'a> {
+    #[inline(always)]
+    pub(crate) fn new(slice: &'a [u8]) -> Self {
+        Self { slice, pos: 0 }
+    }
+}
+
+impl<'a> Read for SliceReader<'a> {
+    #[inline(always)]
+    fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+        let available = self.slice.len().saturating_sub(self.pos);
+        let to_read = buf.len().min(available);
+        
+        if to_read > 0 {
+            buf[..to_read].copy_from_slice(&self.slice[self.pos..self.pos + to_read]);
+            self.pos += to_read;
+        }
+        
+        Ok(to_read)
+    }
+}
+
+impl<'a> RangeReader for SliceReader<'a> {
+    #[inline(always)]
+    fn read_u8(&mut self) -> u8 {
+        match self.slice.get(self.pos) {
+            Some(&byte) => {
+                self.pos += 1;
+                byte
+            }
+            None => {
+                // Out of bound reads return an 1, which is fine, since this
+                // will let the decoder error out with a "dist overflow" error.
+                // Not returning an error results in code that can be better
+                // optimized in the hot path and overall 10% better decoding
+                // performance.
+                1u8
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn try_read_u8(&mut self) -> crate::Result<u8> {
+        let mut buf = [0; 1];
+        self.read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+
+    #[inline(always)]
+    fn try_read_u32_be(&mut self) -> crate::Result<u32> {
+        let mut buf = [0; 4];
+        self.read_exact(buf.as_mut())?;
+        Ok(u32::from_be_bytes(buf))
+    }
+
+    #[inline(always)]
+    fn is_buffer(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn pos(&self) -> usize {
+        self.pos
+    }
+
+    #[inline(always)]
+    fn set_pos(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
+    #[inline(always)]
+    fn buf(&self) -> &[u8] {
+        self.slice
     }
 }
 
@@ -545,7 +626,7 @@ impl<R: Read> RangeReader for BufferedReader<R> {
     }
 
     #[inline(always)]
-    fn read_u32_be(&mut self) -> crate::Result<u32> {
+    fn try_read_u32_be(&mut self) -> crate::Result<u32> {
         // Ensure we have at least 4 bytes available
         self.ensure_available(4)?;
 
