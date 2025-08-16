@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{self, BufReader, BufWriter, Read, Result, Write},
+    io::{BufReader, BufWriter, Read, Result, Write},
     num::NonZeroU64,
     process,
     time::Instant,
