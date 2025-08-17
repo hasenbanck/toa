@@ -7,7 +7,6 @@ mod range_enc;
 use alloc::vec::Vec;
 
 pub use encoder::EncodeMode;
-use encoder::LZMAEncoder;
 use lz::MFType;
 pub use lzma_writer::*;
 
@@ -55,12 +54,6 @@ impl LZMAOptions {
     /// Maximum match finder nice length.
     pub const NICE_LEN_MAX: u32 = 273;
 
-    /// Minimum match finder nice length.
-    pub const NICE_LEN_MIN: u32 = 8;
-
-    /// Default dictionary size (8MB).
-    pub const DICT_SIZE_DEFAULT: u32 = 8 << 20;
-
     const PRESET_TO_DICT_SIZE: &'static [u32] = &[
         1 << 18,
         1 << 20,
@@ -75,31 +68,6 @@ impl LZMAOptions {
     ];
 
     const PRESET_TO_DEPTH_LIMIT: &'static [i32] = &[4, 8, 24, 48];
-
-    /// Creates new LZMA encoding options with specified parameters.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        dict_size: u32,
-        lc: u32,
-        lp: u32,
-        pb: u32,
-        mode: EncodeMode,
-        nice_len: u32,
-        mf: MFType,
-        depth_limit: i32,
-    ) -> Self {
-        Self {
-            dict_size,
-            lc,
-            lp,
-            pb,
-            mode,
-            nice_len,
-            mf,
-            depth_limit,
-            preset_dict: None,
-        }
-    }
 
     /// preset: [0..9]
     #[inline]
@@ -146,23 +114,9 @@ impl LZMAOptions {
         }
     }
 
-    /// Returns the estimated memory usage in kilobytes for these options.
-    pub fn get_memory_usage(&self) -> u32 {
-        let dict_size = self.dict_size;
-        let extra_size_before = get_extra_size_before(dict_size);
-        70 + LZMAEncoder::get_mem_usage(self.mode, dict_size, extra_size_before, self.mf)
-    }
-
     /// Returns the LZMA properties byte for these options.
     #[inline(always)]
     pub fn get_props(&self) -> u8 {
         ((self.pb * 5 + self.lp) * 9 + self.lc) as u8
     }
-}
-
-const COMPRESSED_SIZE_MAX: u32 = 64 << 10;
-
-/// Calculates the extra space needed before the dictionary for LZMA2 encoding.
-pub fn get_extra_size_before(dict_size: u32) -> u32 {
-    COMPRESSED_SIZE_MAX.saturating_sub(dict_size)
 }

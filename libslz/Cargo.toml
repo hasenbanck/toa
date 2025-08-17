@@ -1,6 +1,7 @@
 [package]
 name = "libslz"
 description = "Streaming LZMA compression library"
+authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
 homepage = "https://github.com/hasenbanck/slz/"
 repository = "https://github.com/hasenbanck/slz/"
 documentation = "https://docs.rs/libslz/latest/libslz/"

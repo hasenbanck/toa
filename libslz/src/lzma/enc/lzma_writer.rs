@@ -12,7 +12,6 @@ pub struct LZMAWriter<W: Write> {
     use_end_marker: bool,
     current_uncompressed_size: u64,
     expected_uncompressed_size: Option<u64>,
-    props: u8,
     mode: LZMAEncoderModes,
 }
 
@@ -65,19 +64,8 @@ impl<W: Write> LZMAWriter<W> {
             use_end_marker,
             current_uncompressed_size: 0,
             expected_uncompressed_size,
-            props,
             mode,
         })
-    }
-
-    /// Creates a new LZMA writer that includes a header with the specified input size.
-    #[inline]
-    pub fn new_use_header(
-        out: W,
-        options: &LZMAOptions,
-        input_size: Option<u64>,
-    ) -> crate::Result<Self> {
-        Self::new(out, options, true, input_size.is_none(), input_size)
     }
 
     /// Creates a new LZMA writer without a header.
@@ -88,23 +76,6 @@ impl<W: Write> LZMAWriter<W> {
         use_end_marker: bool,
     ) -> crate::Result<Self> {
         Self::new(out, options, false, use_end_marker, None)
-    }
-
-    /// Returns the LZMA properties byte.
-    #[inline]
-    pub fn props(&self) -> u8 {
-        self.props
-    }
-
-    /// Returns the number of uncompressed bytes written so far.
-    #[inline]
-    pub fn get_uncompressed_size(&self) -> u64 {
-        self.current_uncompressed_size
-    }
-
-    /// Unwraps the writer, returning the underlying writer.
-    pub fn into_inner(self) -> W {
-        self.rc.into_inner()
     }
 
     /// Finishes the compression and returns the underlying writer.

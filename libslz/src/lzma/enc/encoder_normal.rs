@@ -3,7 +3,6 @@ use alloc::{vec, vec::Vec};
 use super::{
     MATCH_LEN_MAX, MATCH_LEN_MIN, REPS,
     encoder::{LZMAEncoder, LZMAEncoderTrait},
-    lz::{LZEncoder, MFType},
     state::State,
 };
 
@@ -19,16 +18,6 @@ impl NormalEncoderMode {
     pub(crate) const EXTRA_SIZE_BEFORE: u32 = Self::OPTS;
 
     pub(crate) const EXTRA_SIZE_AFTER: u32 = Self::OPTS;
-
-    pub(crate) fn get_memory_usage(dict_size: u32, extra_size_before: u32, mf: MFType) -> u32 {
-        LZEncoder::get_memory_usage(
-            dict_size,
-            extra_size_before.max(Self::EXTRA_SIZE_BEFORE),
-            Self::EXTRA_SIZE_AFTER,
-            MATCH_LEN_MAX as u32,
-            mf,
-        ) + Self::OPTS * 64 / 1024
-    }
 
     pub(crate) fn new() -> Self {
         Self {

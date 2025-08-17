@@ -1,12 +1,11 @@
 mod streaming_writer;
 
-use core::num::NonZeroU32;
 use std::num::NonZeroU64;
 
 pub use streaming_writer::SLZStreamingWriter;
 
 use crate::{
-    Prefilter, Write, lzma,
+    Prefilter, lzma,
     lzma::{EncodeMode, lz::MFType},
 };
 

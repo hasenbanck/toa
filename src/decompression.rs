@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use libslz::{BufferedReader, SLZStreamingReader};
+use libslz::{SLZStreamingReader, optimized_reader::BufferedReader};
 
 use crate::Cli;
 

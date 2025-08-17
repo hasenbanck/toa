@@ -8,13 +8,10 @@ use super::{
     encoder_normal::NormalEncoderMode,
     get_dist_state,
     lz::{LZEncoder, MFType},
-    range_enc::{RangeEncoder, RangeEncoderBuffer},
+    range_enc::RangeEncoder,
     state::State,
 };
 use crate::Write;
-
-const LZMA2_UNCOMPRESSED_LIMIT: u32 = (2 << 20) - MATCH_LEN_MAX as u32;
-const LZMA2_COMPRESSED_LIMIT: u32 = (64 << 10) - 26;
 
 const DIST_PRICE_UPDATE_INTERVAL: u32 = FULL_DISTANCES as u32;
 const ALIGN_PRICE_UPDATE_INTERVAL: u32 = ALIGN_SIZE as u32;
@@ -111,24 +108,6 @@ impl LZMAEncoder {
 
         (i << 1) + ((dist >> (i - 1)) & 1)
     }
-
-    pub(crate) fn get_mem_usage(
-        mode: EncodeMode,
-        dict_size: u32,
-        extra_size_before: u32,
-        mf: MFType,
-    ) -> u32 {
-        let mut m = 80;
-        match mode {
-            EncodeMode::Fast => {
-                m += FastEncoderMode::get_memory_usage(dict_size, extra_size_before, mf);
-            }
-            EncodeMode::Normal => {
-                m += NormalEncoderMode::get_memory_usage(dict_size, extra_size_before, mf);
-            }
-        }
-        m
-    }
 }
 
 impl LZMAEncoder {
@@ -217,11 +196,6 @@ impl LZMAEncoder {
         self.data.uncompressed_size += (self.data.read_ahead + 1) as u32;
         self.data.read_ahead = -1;
         mode.reset();
-    }
-
-    #[inline(always)]
-    pub(crate) fn reset_uncompressed_size(&mut self) {
-        self.data.uncompressed_size = 0;
     }
 
     #[allow(unused)]
@@ -585,26 +559,6 @@ impl LZMAEncoder {
         }
         self.match_len_encoder.update_prices();
         self.rep_len_encoder.update_prices();
-    }
-}
-
-impl LZMAEncoder {
-    pub fn encode_for_lzma2(
-        &mut self,
-        rc: &mut RangeEncoder<RangeEncoderBuffer>,
-        mode: &mut dyn LZMAEncoderTrait,
-    ) -> crate::Result<bool> {
-        if !self.lz.is_started() && !self.encode_init(rc)? {
-            return Ok(false);
-        }
-        while self.data.uncompressed_size <= LZMA2_UNCOMPRESSED_LIMIT
-            && rc.get_pending_size() <= LZMA2_COMPRESSED_LIMIT
-        {
-            if !self.encode_symbol(rc, mode)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
     }
 }
 

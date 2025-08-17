@@ -14,17 +14,9 @@ pub mod optimized_reader;
 pub(crate) mod range_dec;
 pub(crate) mod state;
 
-use std::io::Read;
+pub use enc::{EncodeMode, LZMAOptions, LZMAWriter};
 
-pub use enc::{EncodeMode, LZMAOptions, LZMAWriter, get_extra_size_before};
-
-use crate::{
-    error_eof, error_invalid_data,
-    lzma::state::{STATES, State},
-};
-
-/// The minimal size of a dictionary.
-pub const DICT_SIZE_MIN: u32 = 4096;
+use crate::lzma::state::{STATES, State};
 
 /// The maximal size of a dictionary.
 pub const DICT_SIZE_MAX: u32 = u32::MAX & !15_u32;
@@ -57,7 +49,7 @@ const PROB_INIT: u16 = (BIT_MODEL_TOTAL / 2) as u16;
 const MOVE_BITS: u32 = 5;
 const DIST_SPECIAL_INDEX: [usize; 10] = [0, 2, 4, 8, 12, 20, 28, 44, 60, 92];
 const DIST_SPECIAL_END: [usize; 10] = [2, 4, 8, 12, 20, 28, 44, 60, 92, 124];
-const TOP_VALUE: u32 = 0x0100_0000;
+
 const RC_BIT_MODEL_OFFSET: u32 = (1u32 << MOVE_BITS)
     .wrapping_sub(1)
     .wrapping_sub(BIT_MODEL_TOTAL);

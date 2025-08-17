@@ -11,7 +11,6 @@ pub struct Hash234 {
     hash2_table: Vec<i32>,
     hash3_table: Vec<i32>,
     hash4_table: Vec<i32>,
-    hash4_size: u32,
     hash4_mask: u32,
     hash2_value: i32,
     hash3_value: i32,
@@ -33,10 +32,6 @@ impl Hash234 {
         h + 1
     }
 
-    pub(crate) fn get_mem_usage(dict_size: u32) -> u32 {
-        (HASH2_MASK + HASH2_SIZE + Self::get_hash4_size(dict_size)) / (1024 / 4) + 4
-    }
-
     pub(crate) fn new(dict_size: u32) -> Self {
         let hash4_size = Self::get_hash4_size(dict_size);
         let hash4_mask = hash4_size - 1;
@@ -50,18 +45,10 @@ impl Hash234 {
             hash2_table,
             hash3_table,
             hash4_table,
-            hash4_size,
             hash2_value: 0,
             hash3_value: 0,
             hash4_value: 0,
         }
-    }
-
-    #[inline(always)]
-    fn hash_byte(byte: u8) -> u32 {
-        // Original CRC lookup replaced with a golden ratio constant as used for example TEA.
-        // Is ever so slightly faster and also compresses constantly a little bit better.
-        (byte as u32).wrapping_mul(0x9E3779B9)
     }
 
     #[inline(always)]

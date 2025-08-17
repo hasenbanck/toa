@@ -78,7 +78,7 @@ fn test_bcj_filter_roundtrip(
     let mut decompressed_data = Vec::new();
     {
         let cursor = Cursor::new(compressed_data_bcj);
-        let reader = libslz::BufferedReader::new(cursor)
+        let reader = libslz::optimized_reader::BufferedReader::new(cursor)
             .unwrap_or_else(|_| panic!("Failed to create buffered reader for {test_name}"));
         let mut slz_reader = SLZStreamingReader::new(reader, true);
 

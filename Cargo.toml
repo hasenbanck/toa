@@ -10,6 +10,7 @@ hex-literal = "1"
 [package]
 name = "slz"
 description = "Streaming LZMA compression command-line tool"
+authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
 homepage = "https://github.com/hasenbanck/slz/"
 repository = "https://github.com/hasenbanck/slz/"
 license = "Apache-2.0"

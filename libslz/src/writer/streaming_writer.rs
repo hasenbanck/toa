@@ -1,14 +1,12 @@
 use alloc::vec::Vec;
-use core::cell::UnsafeCell;
 
 use crate::{
-    ByteWriter, Prefilter, Result, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
+    ByteWriter, Prefilter, Result, SLZOptions, Write, error_invalid_data,
     header::SLZHeader,
     lzma::{
-        DICT_SIZE_MAX, LZMAOptions, LZMAWriter,
+        LZMAOptions, LZMAWriter,
         filter::{bcj::BCJWriter, delta::DeltaWriter},
     },
-    reed_solomon::encode,
     trailer::SLZTrailer,
 };
 
@@ -284,7 +282,6 @@ mod tests {
     use hex_literal::hex;
 
     use super::*;
-    use crate::lzma::EncodeMode;
 
     // Specification: Appendix A.1 Minimal File
     #[test]

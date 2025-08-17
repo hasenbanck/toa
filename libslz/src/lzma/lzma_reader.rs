@@ -1,33 +1,8 @@
-use alloc::{vec, vec::Vec};
-use std::io::BufReader;
-
 use super::{
     DICT_SIZE_MAX, decoder::LZMADecoder, lz::LZDecoder, optimized_reader::OptimizedReader,
     range_dec::RangeDecoder,
 };
-use crate::{error_invalid_data, error_invalid_input, error_out_of_memory};
-
-/// Calculates the memory usage in KiB required for LZMA decompression from properties byte.
-pub fn get_memory_usage_by_props(dict_size: u32, props_byte: u8) -> crate::Result<u32> {
-    if dict_size > DICT_SIZE_MAX {
-        return Err(error_invalid_input("dict size too large"));
-    }
-    if props_byte > (4 * 5 + 4) * 9 + 8 {
-        return Err(error_invalid_input("invalid props byte"));
-    }
-    let props = props_byte % (9 * 5);
-    let lp = props / 9;
-    let lc = props - lp * 9;
-    get_memory_usage(dict_size, lc as u32, lp as u32)
-}
-
-/// Calculates the memory usage in KiB required for LZMA decompression.
-pub fn get_memory_usage(dict_size: u32, lc: u32, lp: u32) -> crate::Result<u32> {
-    if lc > 8 || lp > 4 {
-        return Err(error_invalid_input("invalid lc or lp"));
-    }
-    Ok(10 + get_dict_size(dict_size)? / 1024 + ((2 * 0x300) << (lc + lp)) / 1024)
-}
+use crate::{error_invalid_data, error_invalid_input};
 
 fn get_dict_size(dict_size: u32) -> crate::Result<u32> {
     if dict_size > DICT_SIZE_MAX {
@@ -55,35 +30,7 @@ impl<R: OptimizedReader> LZMAReader<R> {
 }
 
 impl<R: OptimizedReader> LZMAReader<R> {
-    fn construct1(
-        reader: R,
-        uncomp_size: u64,
-        mut props: u8,
-        dict_size: u32,
-        preset_dict: Option<&[u8]>,
-    ) -> crate::Result<Self> {
-        if props > (4 * 5 + 4) * 9 + 8 {
-            return Err(error_invalid_input("invalid props byte"));
-        }
-        let pb = props / (9 * 5);
-        props -= pb * 9 * 5;
-        let lp = props / 9;
-        let lc = props - lp * 9;
-        if dict_size > DICT_SIZE_MAX {
-            return Err(error_invalid_input("dict size too large"));
-        }
-        Self::construct2(
-            reader,
-            uncomp_size,
-            lc as _,
-            lp as _,
-            pb as _,
-            dict_size,
-            preset_dict,
-        )
-    }
-
-    fn construct2(
+    fn construct(
         reader: R,
         uncomp_size: u64,
         lc: u32,
@@ -119,43 +66,6 @@ impl<R: OptimizedReader> LZMAReader<R> {
         })
     }
 
-    /// Creates a new .lzma file format decompressor with an optional memory usage limit.
-    /// - `mem_limit_kb` - memory usage limit in kibibytes (KiB). `u32::MAX` means no limit.
-    /// - `preset_dict` - preset dictionary or None to use no preset dictionary.
-    pub fn new_mem_limit(
-        mut reader: R,
-        mem_limit_kb: u32,
-        preset_dict: Option<&[u8]>,
-    ) -> crate::Result<Self> {
-        let props = reader.try_read_u8()?;
-        let dict_size = reader.try_read_u32()?;
-
-        let uncomp_size = reader.try_read_u64()?;
-        let need_mem = get_memory_usage_by_props(dict_size, props)?;
-        if mem_limit_kb < need_mem {
-            return Err(error_out_of_memory(
-                "needed memory too big for mem_limit_kb",
-            ));
-        }
-        Self::construct1(reader, uncomp_size, props, dict_size, preset_dict)
-    }
-
-    /// Creates a new input stream that decompresses raw LZMA data (no .lzma header) from `reader` optionally with a preset dictionary.
-    /// - `reader` - the reader to read compressed data from.
-    /// - `uncomp_size` - the uncompressed size of the data to be decompressed.
-    /// - `props` - the LZMA properties byte.
-    /// - `dict_size` - the LZMA dictionary size.
-    /// - `preset_dict` - preset dictionary or None to use no preset dictionary.
-    pub fn new_with_props(
-        reader: R,
-        uncomp_size: u64,
-        props: u8,
-        dict_size: u32,
-        preset_dict: Option<&[u8]>,
-    ) -> crate::Result<Self> {
-        Self::construct1(reader, uncomp_size, props, dict_size, preset_dict)
-    }
-
     /// Creates a new input stream that decompresses raw LZMA data (no .lzma header) from `reader` optionally with a preset dictionary.
     /// - `reader` - the input stream to read compressed data from.
     /// - `uncomp_size` - the uncompressed size of the data to be decompressed.
@@ -173,7 +83,7 @@ impl<R: OptimizedReader> LZMAReader<R> {
         dict_size: u32,
         preset_dict: Option<&[u8]>,
     ) -> crate::Result<Self> {
-        Self::construct2(reader, uncomp_size, lc, lp, pb, dict_size, preset_dict)
+        Self::construct(reader, uncomp_size, lc, lp, pb, dict_size, preset_dict)
     }
 
     fn read_decode(&mut self, buf: &mut [u8]) -> crate::Result<usize> {

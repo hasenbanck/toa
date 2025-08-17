@@ -41,7 +41,7 @@ impl SLZMetadata {
     /// returning metadata about the compression parameters and file sizes.
     /// The reader position is preserved.
     #[cfg(feature = "std")]
-    pub fn parse<R: Read + Seek + ByteReader>(mut reader: R) -> crate::Result<SLZMetadata> {
+    pub fn parse<R: Read + Seek>(mut reader: R) -> crate::Result<SLZMetadata> {
         let original_pos = reader.stream_position()?;
 
         reader.seek(SeekFrom::Start(0))?;

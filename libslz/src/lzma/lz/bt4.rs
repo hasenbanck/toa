@@ -39,10 +39,6 @@ impl BT4 {
         }
     }
 
-    pub(crate) fn get_mem_usage(dict_size: u32) -> u32 {
-        Hash234::get_mem_usage(dict_size) + dict_size / (1024 / 8) + 10
-    }
-
     fn move_pos(&mut self, encoder: &mut super::LZEncoderData) -> i32 {
         let avail = encoder.move_pos(encoder.nice_len as _, 4);
         if avail != 0 {

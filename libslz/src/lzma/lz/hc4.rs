@@ -17,10 +17,6 @@ pub(crate) struct HC4 {
 }
 
 impl HC4 {
-    pub(crate) fn get_mem_usage(dict_size: u32) -> u32 {
-        Hash234::get_mem_usage(dict_size) + dict_size / (1024 / 4) + 10
-    }
-
     pub(crate) fn new(dict_size: u32, nice_len: u32, depth_limit: i32) -> Self {
         let chain = vec![0; dict_size as usize + 1];
 

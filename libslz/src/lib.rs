@@ -1,15 +1,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(unused)]
 
 extern crate alloc;
 
 mod lzma;
 mod reader;
 pub mod reed_solomon;
-#[cfg(feature = "std")]
-mod work_queue;
-pub mod writer;
+
+mod writer;
 
 mod header;
 mod metadata;
@@ -23,11 +21,9 @@ pub(crate) use std::io::Error;
 pub(crate) use std::io::Read;
 #[cfg(feature = "std")]
 pub(crate) use std::io::Write;
-#[cfg(feature = "std")]
-pub(crate) use std::io::{Seek, SeekFrom};
 
 use header::SLZHeader;
-pub use lzma::optimized_reader::*;
+pub use lzma::optimized_reader;
 pub use metadata::SLZMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;
@@ -38,8 +34,6 @@ pub use no_std::Write;
 pub use reader::SLZStreamingReader;
 use trailer::SLZTrailer;
 pub use writer::{SLZOptions, SLZStreamingWriter};
-
-use crate::reed_solomon::decode;
 
 /// Result type of the crate.
 #[cfg(feature = "std")]
@@ -89,34 +83,14 @@ impl From<Prefilter> for u8 {
     }
 }
 
-/// Helper to set the shared error state and trigger shutdown.
-#[cfg(feature = "std")]
-fn set_error(
-    error: Error,
-    error_store: &std::sync::Arc<std::sync::Mutex<Option<Error>>>,
-    shutdown_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-) {
-    let mut guard = error_store.lock().unwrap();
-    if guard.is_none() {
-        *guard = Some(error);
-    }
-    shutdown_flag.store(true, std::sync::atomic::Ordering::Release);
-}
-
-pub trait ByteReader {
+trait ByteReader {
     fn read_u8(&mut self) -> Result<u8>;
-
-    fn read_u32(&mut self) -> Result<u32>;
-
-    fn read_u32_be(&mut self) -> Result<u32>;
 
     fn read_u64(&mut self) -> Result<u64>;
 }
 
 trait ByteWriter {
     fn write_u8(&mut self, value: u8) -> Result<()>;
-
-    fn write_u32(&mut self, value: u32) -> Result<()>;
 
     fn write_u64(&mut self, value: u64) -> Result<()>;
 }
@@ -127,20 +101,6 @@ impl<T: Read> ByteReader for T {
         let mut buf = [0; 1];
         self.read_exact(&mut buf)?;
         Ok(buf[0])
-    }
-
-    #[inline(always)]
-    fn read_u32(&mut self) -> Result<u32> {
-        let mut buf = [0; 4];
-        self.read_exact(buf.as_mut())?;
-        Ok(u32::from_le_bytes(buf))
-    }
-
-    #[inline(always)]
-    fn read_u32_be(&mut self) -> Result<u32> {
-        let mut buf = [0; 4];
-        self.read_exact(buf.as_mut())?;
-        Ok(u32::from_be_bytes(buf))
     }
 
     #[inline(always)]
@@ -155,11 +115,6 @@ impl<T: Write> ByteWriter for T {
     #[inline(always)]
     fn write_u8(&mut self, value: u8) -> Result<()> {
         self.write_all(&[value])
-    }
-
-    #[inline(always)]
-    fn write_u32(&mut self, value: u32) -> Result<()> {
-        self.write_all(&value.to_le_bytes())
     }
 
     #[inline(always)]
@@ -190,12 +145,6 @@ fn error_invalid_input(msg: &'static str) -> Error {
 #[inline(always)]
 fn error_invalid_data(msg: &'static str) -> Error {
     Error::new(std::io::ErrorKind::InvalidData, msg)
-}
-
-#[cfg(feature = "std")]
-#[inline(always)]
-fn error_out_of_memory(msg: &'static str) -> Error {
-    Error::new(std::io::ErrorKind::OutOfMemory, msg)
 }
 
 #[cfg(feature = "std")]

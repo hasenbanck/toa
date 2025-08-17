@@ -1,14 +1,8 @@
-use alloc::{vec, vec::Vec};
-use std::{
-    fs::File,
-    io::{BufRead, BufReader, Cursor, Write},
-};
-
 use super::{
     BIT_MODEL_TOTAL_BITS, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS,
     optimized_reader::OptimizedReader,
 };
-use crate::{ByteReader, error_eof, error_invalid_data, error_invalid_input};
+use crate::error_invalid_input;
 
 pub(crate) struct RangeDecoder<R> {
     inner: R,

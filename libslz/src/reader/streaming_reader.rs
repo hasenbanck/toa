@@ -1,15 +1,7 @@
-use alloc::vec::Vec;
-
 use super::Reader;
 use crate::{
-    ByteReader, Prefilter, Read, Result, SLZ_MAGIC, SLZ_VERSION, SLZHeader, SLZTrailer,
-    error_invalid_data, error_unsupported,
-    lzma::{
-        filter::{bcj::BCJReader, delta::DeltaReader},
-        lzma_reader::LZMAReader,
-        optimized_reader::OptimizedReader,
-    },
-    reed_solomon::decode,
+    ByteReader, Read, Result, SLZHeader, SLZTrailer, error_invalid_data,
+    lzma::optimized_reader::OptimizedReader,
 };
 
 /// A single-threaded streaming SLZ decompressor.
@@ -173,10 +165,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        lzma::{
-            EncodeMode,
-            optimized_reader::{IoReader, SliceReader},
-        },
+        lzma::optimized_reader::{IoReader, SliceReader},
         writer::{SLZOptions, SLZStreamingWriter},
     };
 

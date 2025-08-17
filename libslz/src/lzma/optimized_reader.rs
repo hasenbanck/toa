@@ -1,3 +1,4 @@
+//! Optimized reader implementations for the decoder.
 use std::io::Read;
 
 use crate::{error_eof, error_invalid_data};

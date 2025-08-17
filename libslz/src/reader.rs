@@ -1,18 +1,14 @@
 mod streaming_reader;
 
-use std::io::Seek;
-
 pub use streaming_reader::SLZStreamingReader;
 
 use crate::{
-    ByteReader, Prefilter, Read, Result, SLZ_MAGIC, SLZ_VERSION, error_invalid_data,
-    error_unsupported,
+    Prefilter, Read, Result,
     lzma::{
         filter::{bcj::BCJReader, delta::DeltaReader},
         lzma_reader::LZMAReader,
         optimized_reader::OptimizedReader,
     },
-    reed_solomon::decode,
 };
 
 /// All possible reader combinations.

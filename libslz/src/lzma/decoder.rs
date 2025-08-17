@@ -35,13 +35,6 @@ impl LZMADecoder {
         }
     }
 
-    pub(crate) fn reset(&mut self) {
-        self.coder.reset();
-        self.literal_decoder.reset();
-        self.match_len_decoder.reset();
-        self.rep_len_decoder.reset();
-    }
-
     pub(crate) fn end_marker_detected(&self) -> bool {
         self.coder.reps[0] == -1
     }

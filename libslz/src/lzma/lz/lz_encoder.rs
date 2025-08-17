@@ -2,7 +2,6 @@ use alloc::{vec, vec::Vec};
 use core::ops::Deref;
 
 use super::{bt4::BT4, extend_match, hc4::HC4};
-use crate::Write;
 
 /// Align to a 64-byte cache line
 const MOVE_BLOCK_ALIGN: i32 = 64;
@@ -49,16 +48,6 @@ impl Default for MFType {
     }
 }
 
-impl MFType {
-    #[inline]
-    fn get_memory_usage(self, dict_size: u32) -> u32 {
-        match self {
-            MFType::HC4 => HC4::get_mem_usage(dict_size),
-            MFType::BT4 => BT4::get_mem_usage(dict_size),
-        }
-    }
-}
-
 pub(crate) struct LZEncoder {
     pub(crate) data: LZEncoderData,
     pub(crate) matches: Matches,
@@ -97,21 +86,6 @@ impl Matches {
 }
 
 impl LZEncoder {
-    pub(crate) fn get_memory_usage(
-        dict_size: u32,
-        extra_size_before: u32,
-        extra_size_after: u32,
-        match_len_max: u32,
-        mf: MFType,
-    ) -> u32 {
-        get_buf_size(
-            dict_size,
-            extra_size_before,
-            extra_size_after,
-            match_len_max,
-        ) + mf.get_memory_usage(dict_size)
-    }
-
     pub(crate) fn new_hc4(
         dict_size: u32,
         extra_size_before: u32,
@@ -239,10 +213,6 @@ impl LZEncoder {
         self.data.fill_window(input, &mut self.match_finder)
     }
 
-    pub(crate) fn set_flushing(&mut self) {
-        self.data.set_flushing(&mut self.match_finder)
-    }
-
     pub(crate) fn verify_matches(&self) -> bool {
         self.data.verify_matches(&self.matches)
     }
@@ -321,11 +291,6 @@ impl LZEncoderData {
         }
     }
 
-    fn set_flushing(&mut self, match_finder: &mut dyn MatchFind) {
-        self.read_limit = self.write_pos - 1;
-        self.process_pending_bytes(match_finder);
-    }
-
     fn set_finishing(&mut self, match_finder: &mut dyn MatchFind) {
         self.read_limit = self.write_pos - 1;
         self.finishing = true;
@@ -334,16 +299,6 @@ impl LZEncoderData {
 
     pub fn has_enough_data(&self, already_read_len: i32) -> bool {
         self.read_pos - already_read_len < self.read_limit
-    }
-
-    pub(crate) fn copy_uncompressed<W: Write>(
-        &self,
-        out: &mut W,
-        backward: i32,
-        len: usize,
-    ) -> crate::Result<()> {
-        let start = (self.read_pos + 1 - backward) as usize;
-        out.write_all(&self.buf[start..(start + len)])
     }
 
     #[inline(always)]
