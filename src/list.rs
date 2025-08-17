@@ -21,11 +21,18 @@ pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
         format_size(metadata.dict_size.into())
     );
     println!("  Structure:");
-    println!("    Block count: {}", metadata.block_count);
+    println!(
+        "    Uncompressed Block size: {}",
+        format_size(metadata.block_size)
+    );
     if metadata.block_count > 0 {
         let avg_block_size = metadata.compressed_size / metadata.block_count;
-        println!("    Average block size: {}", format_size(avg_block_size));
+        println!(
+            "    Average compressed block size: {}",
+            format_size(avg_block_size)
+        );
     }
+    println!("    Block count: {}", metadata.block_count);
     println!("  Sizes:");
     println!(
         "    Uncompressed size: {}",

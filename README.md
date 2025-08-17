@@ -56,8 +56,8 @@ slz -9 input.txt
 slz --preset 9 input.txt
 slz --best input.txt
 
-# Set block count for parallelization
-slz -6 --block-count=64 input.txt
+# Set block size for parallelization (2^^26 = 64 MiB)
+slz -6 --block-size=26 input.txt
 
 # List metadata and block information
 slz --list input.txt.slz

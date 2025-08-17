@@ -2,28 +2,28 @@ use super::{
     ByteReader, ByteWriter, Read, Write, error_invalid_data, reed_solomon, reed_solomon::decode,
 };
 
-/// Can either be a block or file trailer.
+/// File trailer containing total uncompressed size, root hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SLZTrailer {
-    /// Uncompressed byte size for the block / file.
-    pub(crate) uncompressed_size: u64,
-    /// Is the chaining value when a block trailer. Or the final hash when file trailer.
+pub(crate) struct SLZFileTrailer {
+    /// Total uncompressed byte size for all blocks.
+    pub(crate) total_uncompressed_size: u64,
+    /// Blake3 root hash of the entire file.
     pub(crate) blake3_hash: [u8; 32],
     pub(crate) rs_parity: [u8; 32],
 }
 
-impl SLZTrailer {
-    pub(crate) fn new(uncompressed_size: u64, blake3_hash: [u8; 32]) -> Self {
+impl SLZFileTrailer {
+    pub(crate) fn new(total_uncompressed_size: u64, blake3_hash: [u8; 32]) -> Self {
         let rs_parity = reed_solomon::encode(&blake3_hash);
         Self {
-            uncompressed_size,
+            total_uncompressed_size,
             blake3_hash,
             rs_parity,
         }
     }
 
-    pub(crate) fn parse_file_trailer<R: Read>(mut reader: R) -> crate::Result<SLZTrailer> {
-        let uncompressed_size = reader.read_u64()?;
+    pub(crate) fn parse<R: Read>(mut reader: R) -> crate::Result<SLZFileTrailer> {
+        let total_uncompressed_size = reader.read_u64()?;
 
         let mut blake3_hash = [0u8; 32];
         reader.read_exact(&mut blake3_hash)?;
@@ -36,8 +36,8 @@ impl SLZTrailer {
             match reader.read(&mut rs_parity[bytes_read..]) {
                 Ok(0) => {
                     // EOF reached - attempt recovery with partial data.
-                    return Self::parse_truncated_trailer(
-                        uncompressed_size,
+                    return Self::parse_truncated(
+                        total_uncompressed_size,
                         blake3_hash,
                         rs_parity,
                         bytes_read,
@@ -51,8 +51,8 @@ impl SLZTrailer {
                     {
                         if error.kind() == std::io::ErrorKind::UnexpectedEof {
                             // Attempt recovery with partial data
-                            return Self::parse_truncated_trailer(
-                                uncompressed_size,
+                            return Self::parse_truncated(
+                                total_uncompressed_size,
                                 blake3_hash,
                                 rs_parity,
                                 bytes_read,
@@ -65,19 +65,19 @@ impl SLZTrailer {
         }
 
         // Complete trailer read successfully.
-        Ok(SLZTrailer {
-            uncompressed_size,
+        Ok(SLZFileTrailer {
+            total_uncompressed_size,
             blake3_hash,
             rs_parity,
         })
     }
 
-    fn parse_truncated_trailer(
-        uncompressed_size: u64,
+    fn parse_truncated(
+        total_uncompressed_size: u64,
         blake3_hash: [u8; 32],
         partial_rs_parity: [u8; 32],
         bytes_read: usize,
-    ) -> crate::Result<SLZTrailer> {
+    ) -> crate::Result<SLZFileTrailer> {
         eprintln!(
             "Warning: Truncated trailer detected. Missing {} bytes from Reed-Solomon parity. Attempting recovery...",
             32 - bytes_read
@@ -113,8 +113,8 @@ impl SLZTrailer {
                     parity
                 };
 
-                Ok(SLZTrailer {
-                    uncompressed_size,
+                Ok(SLZFileTrailer {
+                    total_uncompressed_size,
                     blake3_hash: recovered_blake3_hash,
                     rs_parity: recovered_rs_parity,
                 })
@@ -133,49 +133,11 @@ impl SLZTrailer {
         }
     }
 
-    pub(crate) fn write_file_trailer<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        // Write end-of-blocks marker.
-        writer.write_u64(0)?;
-
-        // Write uncompressed size field.
-        writer.write_u64(self.uncompressed_size)?;
-
-        // Write Blake3 hash.
+    pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+        writer.write_u64(0)?; // end-of-blocks marker
+        writer.write_u64(self.total_uncompressed_size)?;
         writer.write_all(&self.blake3_hash)?;
-
-        // Write Reed-Solomon parity.
-        writer.write_all(&self.rs_parity)?;
-
-        Ok(())
-    }
-
-    pub(crate) fn parse_block_trailer<R: Read>(mut reader: R) -> crate::Result<SLZTrailer> {
-        let uncompressed_size = reader.read_u64()?;
-
-        let mut blake3_hash = [0u8; 32];
-        reader.read_exact(&mut blake3_hash)?;
-
-        let mut rs_parity = [0u8; 32];
-        reader.read_exact(&mut rs_parity)?;
-
-        Ok(SLZTrailer {
-            uncompressed_size,
-            blake3_hash,
-            rs_parity,
-        })
-    }
-
-    pub(crate) fn write_block_trailer<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        // Write uncompressed size field.
-        writer.write_u64(self.uncompressed_size)?;
-
-        // Write Blake3 hash.
-        writer.write_all(&self.blake3_hash)?;
-
-        // Write Reed-Solomon parity.
-        writer.write_all(&self.rs_parity)?;
-
-        Ok(())
+        writer.write_all(&self.rs_parity)
     }
 
     pub(crate) fn verify(
@@ -183,34 +145,97 @@ impl SLZTrailer {
         validate_trailer: bool,
         computed_bytes: &[u8; 32],
     ) -> crate::Result<()> {
-        if !validate_trailer {
-            return match computed_bytes == &self.blake3_hash {
-                true => Ok(()),
-                false => Err(error_invalid_data("Blake3 hash mismatch")),
-            };
+        verify_trailer(
+            &self.blake3_hash,
+            &self.rs_parity,
+            validate_trailer,
+            computed_bytes,
+        )
+    }
+}
+
+/// Block trailer containing Blake3 chaining value and Reed-Solomon parity.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SLZBlockTrailer {
+    /// Blake3 chaining value for this block.
+    pub(crate) blake3_hash: [u8; 32],
+    pub(crate) rs_parity: [u8; 32],
+}
+
+impl SLZBlockTrailer {
+    pub(crate) fn new(blake3_hash: [u8; 32]) -> Self {
+        let rs_parity = reed_solomon::encode(&blake3_hash);
+        Self {
+            blake3_hash,
+            rs_parity,
         }
+    }
 
-        let mut codeword = [0u8; 64];
-        codeword[..32].copy_from_slice(&self.blake3_hash);
-        codeword[32..].copy_from_slice(&self.rs_parity);
+    pub(crate) fn parse<R: Read>(mut reader: R) -> crate::Result<SLZBlockTrailer> {
+        let mut blake3_hash = [0u8; 32];
+        reader.read_exact(&mut blake3_hash)?;
 
-        match decode(&mut codeword) {
-            Ok(corrected) => {
-                if corrected {
-                    eprintln!("blake3 hash was corrected by the error correction");
-                }
+        let mut rs_parity = [0u8; 32];
+        reader.read_exact(&mut rs_parity)?;
 
-                let corrected_hash = &codeword[..32];
-                if computed_bytes == corrected_hash {
-                    Ok(())
-                } else {
-                    Err(error_invalid_data("blake3 hash mismatch"))
-                }
+        Ok(SLZBlockTrailer {
+            blake3_hash,
+            rs_parity,
+        })
+    }
+
+    pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+        writer.write_all(&self.blake3_hash)?;
+        writer.write_all(&self.rs_parity)
+    }
+
+    pub(crate) fn verify(
+        &self,
+        validate_trailer: bool,
+        computed_bytes: &[u8; 32],
+    ) -> crate::Result<()> {
+        verify_trailer(
+            &self.blake3_hash,
+            &self.rs_parity,
+            validate_trailer,
+            computed_bytes,
+        )
+    }
+}
+
+fn verify_trailer(
+    blake3_hash: &[u8; 32],
+    rs_parity: &[u8; 32],
+    validate_trailer: bool,
+    computed_bytes: &[u8; 32],
+) -> crate::Result<()> {
+    if !validate_trailer {
+        return match computed_bytes == blake3_hash {
+            true => Ok(()),
+            false => Err(error_invalid_data("blake3 hash mismatch")),
+        };
+    }
+
+    let mut codeword = [0u8; 64];
+    codeword[..32].copy_from_slice(blake3_hash);
+    codeword[32..].copy_from_slice(rs_parity);
+
+    match decode(&mut codeword) {
+        Ok(corrected) => {
+            if corrected {
+                eprintln!("blake3 hash was corrected by the error correction");
             }
-            Err(_) => Err(error_invalid_data(
-                "blake3 hash is corrupted and can't be corrected",
-            )),
+
+            let corrected_hash = &codeword[..32];
+            if computed_bytes == corrected_hash {
+                Ok(())
+            } else {
+                Err(error_invalid_data("blake3 hash mismatch"))
+            }
         }
+        Err(_) => Err(error_invalid_data(
+            "blake3 hash is corrupted and can't be corrected",
+        )),
     }
 }
 
@@ -223,75 +248,81 @@ mod tests {
     #[test]
     fn test_trailer_parse_complete() {
         let blake3_hash = [0x42u8; 32];
-        let trailer = SLZTrailer::new(12345, blake3_hash);
+        let trailer = SLZFileTrailer::new(12345, blake3_hash);
 
         let mut buffer = Vec::new();
-        trailer
-            .write_file_trailer(&mut buffer)
-            .expect("write should succeed");
+        trailer.write(&mut buffer).expect("write should succeed");
 
         // Remove the end-of-blocks marker for parsing
         let trailer_data = &buffer[8..];
-        let parsed_trailer = SLZTrailer::parse_file_trailer(Cursor::new(trailer_data))
-            .expect("parse should succeed");
+        let parsed_trailer =
+            SLZFileTrailer::parse(Cursor::new(trailer_data)).expect("parse should succeed");
 
-        assert_eq!(parsed_trailer.uncompressed_size, 12345);
+        assert_eq!(parsed_trailer.total_uncompressed_size, 12345);
         assert_eq!(parsed_trailer.blake3_hash, blake3_hash);
     }
 
     #[test]
     fn test_trailer_parse_truncated_recoverable() {
         let blake3_hash = [0x42u8; 32];
-        let trailer = SLZTrailer::new(12345, blake3_hash);
+        let trailer = SLZFileTrailer::new(12345, blake3_hash);
 
         let mut buffer = Vec::new();
-        trailer
-            .write_file_trailer(&mut buffer)
-            .expect("write should succeed");
+        trailer.write(&mut buffer).expect("write should succeed");
 
         // Remove the end-of-blocks marker and truncate few parity bytes (within Reed-Solomon limits)
         let trailer_data = &buffer[8..];
         let truncated_data = &trailer_data[..trailer_data.len() - 3];
 
-        let parsed_trailer = SLZTrailer::parse_file_trailer(Cursor::new(truncated_data))
+        let parsed_trailer = SLZFileTrailer::parse(Cursor::new(truncated_data))
             .expect("truncated parse should succeed");
 
-        assert_eq!(parsed_trailer.uncompressed_size, 12345);
+        assert_eq!(parsed_trailer.total_uncompressed_size, 12345);
     }
 
     #[test]
     fn test_trailer_parse_severely_truncated() {
         let blake3_hash = [0x42u8; 32];
-        let trailer = SLZTrailer::new(12345, blake3_hash);
+        let trailer = SLZFileTrailer::new(12345, blake3_hash);
 
         let mut buffer = Vec::new();
-        trailer
-            .write_file_trailer(&mut buffer)
-            .expect("write should succeed");
+        trailer.write(&mut buffer).expect("write should succeed");
 
         // Remove the end-of-blocks marker and truncate to only have size + partial hash
         let trailer_data = &buffer[8..];
         let severely_truncated = &trailer_data[..20];
 
-        let result = SLZTrailer::parse_file_trailer(Cursor::new(severely_truncated));
+        let result = SLZFileTrailer::parse(Cursor::new(severely_truncated));
         assert!(result.is_err(), "severely truncated parse should fail");
     }
 
     #[test]
     fn test_trailer_parse_no_parity_fails() {
         let blake3_hash = [0x42u8; 32];
-        let trailer = SLZTrailer::new(12345, blake3_hash);
+        let trailer = SLZFileTrailer::new(12345, blake3_hash);
 
         let mut buffer = Vec::new();
-        trailer
-            .write_file_trailer(&mut buffer)
-            .expect("write should succeed");
+        trailer.write(&mut buffer).expect("write should succeed");
 
         // Remove the end-of-blocks marker and keep only size + hash (no parity)
         let trailer_data = &buffer[8..];
         let no_parity_data = &trailer_data[..40];
 
-        let result = SLZTrailer::parse_file_trailer(Cursor::new(no_parity_data));
+        let result = SLZFileTrailer::parse(Cursor::new(no_parity_data));
         assert!(result.is_err(), "no parity parse should fail");
+    }
+
+    #[test]
+    fn test_block_trailer_parse_complete() {
+        let blake3_hash = [0x42u8; 32];
+        let trailer = SLZBlockTrailer::new(blake3_hash);
+
+        let mut buffer = Vec::new();
+        trailer.write(&mut buffer).expect("write should succeed");
+
+        let parsed_trailer =
+            SLZBlockTrailer::parse(Cursor::new(&buffer)).expect("parse should succeed");
+
+        assert_eq!(parsed_trailer.blake3_hash, blake3_hash);
     }
 }

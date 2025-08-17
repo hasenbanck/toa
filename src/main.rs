@@ -21,7 +21,7 @@ struct Cli {
     keep: bool,
     verbose: bool,
     preset: u32,
-    block_size: Option<u64>,
+    block_size: Option<u8>,
     block_count: Option<u64>,
     x86: bool,
     arm: bool,
@@ -89,11 +89,10 @@ impl Cli {
             )
             .arg(
                 Arg::new("block-size")
-                    .help("Block size in uncompressed bytes (must be multiple of 1024)")
+                    .help("Block size as power of 2 (16-62, e.g., 26 = 64MiB)")
                     .long("block-size")
-                    .value_name("bytes")
-                    .value_parser(value_parser!(u64).range(1024..=18446744073709551615))
-                    .conflicts_with("block-count"),
+                    .value_name("N")
+                    .value_parser(value_parser!(u8).range(16..=62)),
             )
             .arg(
                 Arg::new("block-count")
@@ -303,15 +302,6 @@ impl Cli {
             *matches.get_one::<u32>("preset").unwrap()
         };
 
-        // Validate block size alignment
-        let block_size = matches.get_one::<u64>("block-size").copied();
-        if let Some(size) = block_size {
-            if size % 1024 != 0 {
-                eprintln!("Error: Block size must be a multiple of 1024 bytes (1 KiB)");
-                process::exit(1);
-            }
-        }
-
         Self {
             input: matches.get_one::<String>("input").unwrap().clone(),
             output: matches.get_one::<String>("output").cloned(),
@@ -320,7 +310,7 @@ impl Cli {
             keep: matches.get_flag("keep"),
             verbose: matches.get_flag("verbose"),
             preset,
-            block_size,
+            block_size: matches.get_one::<u8>("block-size").copied(),
             block_count: matches.get_one::<u64>("block-count").copied(),
             x86: matches.get_flag("x86"),
             arm: matches.get_flag("arm"),

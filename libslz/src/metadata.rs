@@ -10,6 +10,8 @@ use crate::{
 pub struct SLZMetadata {
     /// The prefilter used in the file
     pub prefilter: Prefilter,
+    /// Blocksize used
+    pub block_size: u64,
     /// LZMA literal context bits
     pub lc: u8,
     /// LZMA literal position bits
@@ -60,6 +62,32 @@ impl SLZMetadata {
         }
 
         let prefilter_byte = reader.read_u8()?;
+
+        let block_size_exponent = reader.read_u8()?;
+        if !(16u8..=62u8).contains(&block_size_exponent) {
+            reader.seek(SeekFrom::Start(original_pos))?;
+            return Err(error_invalid_data("invalid block size"));
+        }
+        let block_size = 2u64.pow(block_size_exponent as u32);
+
+        let props = reader.read_u8()?;
+        let lc = props % 9;
+        let temp = props / 9;
+        let lp = temp % 5;
+        let pb = temp / 5;
+
+        if lc > 8 || lp > 4 || pb > 4 {
+            reader.seek(SeekFrom::Start(original_pos))?;
+            return Err(error_invalid_data("invalid LZMA properties"));
+        }
+
+        let dict_size_log2 = reader.read_u8()?;
+        if !(16u8..=31u8).contains(&dict_size_log2) {
+            reader.seek(SeekFrom::Start(original_pos))?;
+            return Err(error_invalid_data("invalid dictionary size"));
+        }
+        let dict_size = 2u32.pow(dict_size_log2 as u32);
+
         let prefilter = match prefilter_byte {
             0x00 => Prefilter::None,
             0x01 => {
@@ -82,29 +110,18 @@ impl SLZMetadata {
             }
         };
 
-        let props = reader.read_u8()?;
-        let lc = props % 9;
-        let temp = props / 9;
-        let lp = temp % 5;
-        let pb = temp / 5;
-
-        if lc > 8 || lp > 4 || pb > 4 {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_invalid_data("invalid LZMA properties"));
-        }
-
-        let dict_size_log2 = reader.read_u8()?;
-        if dict_size_log2 > 16 {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_invalid_data("invalid dictionary size"));
-        }
-        let dict_size = 2u32.pow((dict_size_log2 + 16) as u32);
-
         let mut compressed_size = 0u64;
 
         let mut block_count = 0u64;
         loop {
-            let block_size = reader.read_u64()?;
+            let size_with_flag = reader.read_u64()?;
+            let is_partial_block = (size_with_flag as i64) < 0;
+            let block_size = if is_partial_block {
+                (-(size_with_flag as i64)) as u64
+            } else {
+                size_with_flag
+            };
+
             if block_size == 0 {
                 // End-of-blocks marker found
                 break;
@@ -112,8 +129,8 @@ impl SLZMetadata {
             compressed_size += block_size;
             block_count += 1;
 
-            // Skip the compressed data and the 72-byte block trailer
-            reader.seek(SeekFrom::Current(block_size as i64 + 72))?;
+            // Skip the compressed data and the 64-byte block trailer
+            reader.seek(SeekFrom::Current(block_size as i64 + 64))?;
         }
 
         // 72 bytes for trailer
@@ -151,6 +168,7 @@ impl SLZMetadata {
 
         Ok(SLZMetadata {
             prefilter,
+            block_size,
             lc,
             lp,
             pb,

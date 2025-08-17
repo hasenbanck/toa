@@ -2,7 +2,6 @@ use std::{
     fs,
     fs::File,
     io::{BufReader, BufWriter, Read, Write},
-    num::NonZeroU64,
     time::Instant,
 };
 
@@ -10,15 +9,28 @@ use libslz::{SLZOptions, SLZStreamingWriter};
 
 use crate::Cli;
 
-fn calculate_block_size(file_size: u64, block_count: u64) -> Option<NonZeroU64> {
+fn calculate_block_size_exponent(file_size: u64, block_count: u64) -> Option<u8> {
     if block_count == 0 {
         return None;
     }
 
     let block_size = file_size.div_ceil(block_count);
-    // Align to 1 KiB boundary, ensuring minimum of 1024 bytes
-    let aligned_size = ((block_size + 1023) / 1024) * 1024;
-    NonZeroU64::new(aligned_size.max(1024))
+
+    if block_size <= 65536 {
+        return Some(16);
+    }
+
+    // Find the smallest power of 2 that is >= block_size.
+    let log2_size = (64 - block_size.leading_zeros()) as u8;
+
+    // If block_size is already a power of 2, use it as-is, otherwise round up.
+    if block_size.is_power_of_two() {
+        log2_size - 1
+    } else {
+        log2_size
+    }
+    .clamp(16, 62)
+    .into()
 }
 
 pub(crate) fn compress_file(
@@ -50,10 +62,10 @@ pub(crate) fn compress_file(
         options = options.with_dictionary_size(dict_size);
     }
     if let Some(block_size) = cli.block_size {
-        options = options.with_block_size(NonZeroU64::new(block_size));
+        options = options.with_block_size_exponent(Some(block_size));
     } else if let Some(block_count) = cli.block_count {
-        let calculated_block_size = calculate_block_size(file_size, block_count);
-        options = options.with_block_size(calculated_block_size);
+        let calculated_exponent = calculate_block_size_exponent(file_size, block_count);
+        options = options.with_block_size_exponent(calculated_exponent);
     }
 
     let mut slz_writer = SLZStreamingWriter::new(output_writer, options);

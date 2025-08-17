@@ -24,9 +24,9 @@ decompression. Block boundaries are discoverable without parsing the entire file
 **Incremental Verification**: Each block contains its own integrity information protected by Reed-Solomon codes,
 enabling per-block validation and partial file verification without processing the entire archive.
 
-**Efficient Append Operations**: The inclusion of BLAKE3 chaining values per block enables O(n) append operations
-where n is the number of blocks, rather than O(m) where m is the total data size. This makes incremental backups
-and log aggregation highly efficient.
+**Efficient Append Operations**: The inclusion of BLAKE3 chaining values per block enables efficient append operations.
+When the last block is full (equals the configured block size), appending is O(n) where n is the number of blocks.
+When the last block is partial, it must be recompressed with the appended data to maintain the BLAKE3 tree structure.
 
 **Data Integrity**: Multiple validation layers protect against corruption. The format employs Blake3 hashing for
 content verification at both block and file levels, with Reed-Solomon error correction codes protecting each hash
@@ -48,7 +48,7 @@ A Streaming-LZMA file consists of three sections:
 
 ```
 +==================+
-|      Header      |  (Variable: 6-9 bytes)
+|      Header      |  (Variable: 7-10 bytes)
 +==================+
 |      Blocks      |  (Variable: 0 or more blocks with trailers, but always ending with a end-of-blocks marker)
 +==================+
@@ -65,6 +65,8 @@ The header contains format identification and compression configuration:
 | 0xFE | 0xDC | 0xBA | 0x98 |  Magic bytes (4 bytes)
 +------+------+------+------+
 |    Version   | Prefilter  |  Version and prefilter (2 bytes)
++------+------+------+------+
+|   Block Size Exponent      |  (1 byte)
 +------+------+------+------+
 |   LZMA Properties         |  (2 bytes)
 +---------------------------+
@@ -106,7 +108,26 @@ One byte indicating the optional prefilter:
 
 The prefilters are the same as used by LZMA SDK and liblzma.
 
-### 3.4 LZMA Properties
+### 3.4 Block Size
+
+One byte encoding the block size as a power of 2:
+
+- Block size = 2^n bytes where n is the value of this byte
+- Valid range: n ∈ [16, 62] (64 KiB to 4 EiB)
+- Minimum: n=16 → 2^16 = 64 KiB
+- Maximum: n=30 → 2^62 = 4 EiB
+
+Examples:
+
+- n=16: 2^16 = 64 KiB
+- n=24: 2^24 = 16 MiB
+- n=31: 2^31 = 2 GiB
+- n=62: 2^62 = 4 EiB
+
+**Important**: The block size determines the uncompressed size of all full blocks.
+Only the last block may be partial (smaller than block size).
+
+### 3.5 LZMA Properties
 
 Two bytes encoding LZMA compression parameters:
 
@@ -114,15 +135,15 @@ Two bytes encoding LZMA compression parameters:
     - lc: number of literal context bits (0-8)
     - lp: number of literal position bits (0-4)
     - pb: number of position bits (0-4)
-- **Byte 1**: Dictionary size as power of 2 (size = 2^(n+16))
+- **Byte 1**: Dictionary size as 2^n bytes where n is the value of this byte
 
-Valid dictionary sizes range from 64 KiB (n=0) to 2 GiB (n=15).
+Valid dictionary sizes range from 64 KiB (n=16) to 2 GiB (n=31).
 
 Examples:
 
-- n=0: 2^16 = 64 KiB
-- n=8: 2^24 = 16 MiB
-- n=15: 2^31 = 2 GiB
+- n=16: 2^16 = 64 KiB
+- n=24: 2^24 = 16 MiB
+- n=31: 2^31 = 2 GiB
 
 **Note on LZMA parameters**: While the default LZMA parameters (lc=3, lp=0, pb=2) work
 well for most data, BCJ filters benefit from adjusted parameters. For example:
@@ -132,7 +153,7 @@ well for most data, BCJ filters benefit from adjusted parameters. For example:
 - RISC-V executable with compressed instructions: lc=3,lp=1,pb=2
 - x86 executables: lc=3,lp=0,pb=2 (default)
 
-### 3.5 Prefilter Properties
+### 3.6 Prefilter Properties
 
 Filter-specific configuration parameters:
 
@@ -176,20 +197,28 @@ Each block consists of:
 
 ```
 +---------------------+
-| Compressed Size (8) |  Compressed data size in bytes
+| Compressed Size (8) |  Compressed data size with block type flag
 +---------------------+
 | Compressed Data     |  LZMA compressed stream
 +---------------------+
-| Block Trailer (72)  |  Integrity and metadata
+| Block Trailer (64)  |  Integrity and metadata
 +---------------------+
 ```
 
-#### 4.1.1 Size Field
+#### 4.1.1 Size Field with Block Type Flag
 
-- **Size** (8 bytes): Compressed size of the block data in bytes, stored as little-endian uint64
-- Minimum size: 1 B (size field value 0x0000000000000001)
-- Maximum size: 16 EiB - 1 B (size field value 0xFFFFFFFFFFFFFFFF)
+- **Size** (8 bytes): Stored as little-endian int64 with special MSB handling:
+    - **MSB = 0** (positive value): Full block (uncompressed size = block_size from header)
+    - **MSB = 1** (negative value): Partial block (only allowed as the last block)
+    - The actual compressed size is the absolute value of this field
+- Maximum compressed size: 2^63 - 1 bytes
+- Minimum compressed size: 1 byte
 - Zero-length blocks are not permitted
+
+**Examples**:
+
+- 0x0000000000001000: Full block with 4096 bytes compressed data
+- 0x8000000000000800: Partial block with 2048 bytes compressed data
 
 #### 4.1.2 Compressed Data
 
@@ -199,19 +228,15 @@ Each block consists of:
 
 #### 4.1.3 Block Trailer
 
-Each block includes a 72-byte trailer for integrity and metadata:
+Each block includes a 64-byte trailer for integrity and metadata:
 
 ```
 +---------------------+
-| Uncompressed Size   |  (8 bytes, little-endian)
-+---------------------+
-| BLAKE3 Hash/CV      |  (32 bytes, see note)
+| BLAKE3 Hash/CV      |  (32 bytes)
 +---------------------+
 | Reed-Solomon Parity |  (32 bytes)
 +---------------------+
 ```
-
-**Uncompressed Size**: Size of the block after decompression in bytes.
 
 **BLAKE3 Hash/Chaining Value**:
 
@@ -227,28 +252,40 @@ completion, the implementation must determine whether this is the final block:
 **Reed-Solomon Parity**: 32 bytes of Reed-Solomon parity protecting the BLAKE3 chaining value
 using the same parameters as the final trailer (GF(2^8), n=64, k=32, t=16).
 
-### 4.2 Block Size Requirements and Recommendations
+### 4.2 Block Size Requirements
 
-**BLAKE3 Alignment Requirement**:
+**BLAKE3 Tree Structure Requirements**:
 
-All blocks except the last block MUST have uncompressed sizes that are multiples of 1024 bytes (1 KiB).
-This requirement ensures proper BLAKE3 chunk boundary alignment when using input offsets for parallel hashing.
+To maintain a valid BLAKE3 tree structure that supports efficient append operations:
 
-- **All blocks except last**: Uncompressed size MUST be divisible by 1024
-- **Last block**: May have any uncompressed size (no alignment required)
-- **Rationale**: BLAKE3's `set_input_offset()` requires offsets to be chunk-aligned (1024-byte boundaries)
+- **Full blocks**: Have uncompressed size exactly equal to the block size specified in the header
+- **Partial block**: Only the last block may be partial (uncompressed size < block_size)
+- **Block size**: MUST be a power of 2 and at least 64 KiB
+
+**Determining Uncompressed Size**:
+
+- For full blocks (MSB = 0): uncompressed_size = block_size from header
+- For partial blocks (MSB = 1): block must be uncompressed to get exact block size
+
+**Rationale**: BLAKE3's tree structure requires chunks to form a specific binary tree where left subtrees
+are complete binary trees with power-of-2 chunks. By enforcing power-of-2 block sizes and requiring all
+non-final blocks to be exactly that size, we ensure:
+
+1. The BLAKE3 tree structure remains valid
+2. Chaining values can be computed with correct input offsets
+3. Append operations remain efficient when the last block is full
 
 **Compression Ratio Trade-offs**:
 
 The choice of block size directly impacts compression ratio:
 
-- **Single block**: Maximum compression ratio, limited parallelization
-- **Multiple blocks**: Reduced compression ratio due to dictionary reset at boundaries, but enables parallel processing
+- **Larger blocks**: Better compression ratio, more memory usage, less parallelization for medium inputs
+- **Smaller blocks**: Lower compression ratio, less memory usage, more parallelization opportunities
 
 **Optimal configuration**:
 
 - Block size should be ≥ dictionary size for efficient compression
-- Recommended block sizes: 1 MiB to 64 MiB depending on use case (must be 1 KiB-aligned)
+- Recommended block sizes: 1 MiB to 512 MiB depending on use case (must be power of 2)
 - Consider memory usage: parallel decompression requires approximately (dict_size + block_size) × thread_count
 
 ### 4.3 End-of-Blocks Marker
@@ -308,42 +345,47 @@ are thoroughly understood and battle-tested implementations are available.
 
 ### 6.1 Compression
 
-1. Write header with appropriate configuration
+1. Write header with appropriate configuration including block size exponent
 2. For each block of input data:
     - Track cumulative uncompressed offset
     - Initialize BLAKE3 hasher with appropriate offset
     - Compress the block with LZMA while updating the hasher
+    - Determine if this is a full or partial block
     - At block completion, determine finalization:
         - **If this is the first block and no more data follows** (single-block file):
           Create the hash as root hash.
         - **Otherwise** (multi-block file or more blocks coming):
           Create the hash as non-root hash (chaining value).
     - Calculate Reed-Solomon parity of the hash/CV
-    - Write: compressed size, compressed data, block trailer
+    - Set compressed size field with MSB flag (0 for full block, 1 for partial block)
+    - Write: compressed size (with flag), compressed data, block trailer
 3. Write end-of-blocks marker
 4. **For multi-block files**: Merge all block chaining values to compute root hash
    **For single-block files**: The root hash is already in the block trailer
 5. Calculate Reed-Solomon parity of root hash
-6. Write final trailer
+6. Write final trailer with total uncompressed size
 
 ### 6.2 Decompression
 
 #### Sequential Mode
 
-1. Verify header and parse configuration
-2. For each block until end-of-blocks marker:
-    - Read compressed size
+1. Verify header and parse configuration including block size
+2. Track number of full blocks processed
+3. For each block until end-of-blocks marker:
+    - Read compressed size with MSB flag
     - If size is zero, end block processing
+    - Extract actual compressed size (absolute value)
+    - Determine block type from MSB (0 = full, 1 = partial)
     - Read and decompress block data
     - Read block trailer
     - Verify chaining value (with RS correction if needed)
     - Accumulate for final hash verification
-3. Merge all chaining values to compute expected root hash
-4. Verify against final trailer (with RS correction if needed)
+4. Merge all chaining values to compute expected root hash
+5. Verify against final trailer (with RS correction if needed)
 
 #### Parallel Mode
 
-1. Parse header
+1. Parse header including block size
 2. Scan all block headers to build offset table or
    dispatch block to worker threads once sequentially read
 3. Distribute blocks to worker threads
@@ -360,16 +402,26 @@ To append data to an existing archive:
 
 1. Scan existing blocks to collect:
     - Chaining values from block trailers
-    - Uncompressed sizes and offsets
-2. Seek to end-of-blocks marker
-3. Overwrite marker and final trailer with new blocks
-4. For each new block:
+    - Block type flags (full vs partial)
+    - Count of full blocks
+2. Check if last block is partial (MSB = 1 in compressed size):
+    - If partial: Read and decompress the last block, combine with new data, recompress
+    - If full: Proceed to step 3
+3. Seek to end-of-blocks marker
+4. Overwrite marker and final trailer with new blocks
+5. For each new block:
+    - Ensure all blocks except the last have exactly block_size bytes
     - Compute chaining value with correct offset
+    - Set appropriate MSB flag in compressed size
     - Write block with trailer
-5. Merge all chaining values (old and new) for root hash
-6. Write new end-of-blocks marker and final trailer
+6. Update total uncompressed size
+7. Merge all chaining values (old and new) for root hash
+8. Write new end-of-blocks marker and final trailer
 
-**Performance**: O(n) where n is number of blocks, not O(m) where m is data size
+**Performance**:
+
+- When last block is full: O(n) where n is number of blocks, not O(m) where m is data size
+- When last block is partial: Requires recompressing the last block plus new data
 
 ### 6.4 Incremental Verification
 
@@ -410,6 +462,7 @@ Decoders MUST abort on:
 - Invalid magic bytes
 - Unsupported version
 - Invalid configuration values
+- Invalid block size (not power of 2 or < 64 KiB, except for the last block)
 
 ### 8.2 Block-Level Errors
 
@@ -417,6 +470,7 @@ For each block, decoders SHOULD:
 
 - Attempt Reed-Solomon correction on corrupted chaining values
 - Report blocks that fail integrity checks
+- Verify that only the last block has the partial flag set
 - Implementation MAY continue processing remaining blocks if possible
 
 ### 8.3 Recovery Capabilities
@@ -434,17 +488,21 @@ With block trailers, the format supports:
 
 - Decoders MUST validate all size fields before allocation
 - Decoders MUST prevent integer overflow in offset calculations
+- Decoders MUST validate block size is power of 2 and within valid range
 
 ### 9.2 Resource Limits
 
 - Decoders SHOULD implement configurable memory usage limits
 - Parallel decoders SHOULD limit thread pool size
+- Maximum compressed block size is limited to 2^63 - 1 bytes
 
 ### 9.3 Tree Structure Integrity
 
 - Decoders MUST verify block offsets form valid BLAKE3 tree
 - Chaining values MUST be computed with correct input offsets
 - Tree merging MUST follow BLAKE3 specifications exactly
+- Block sizes MUST follow the power-of-2 requirements
+- Only the last block may be partial
 
 ### 9.4 Cryptographic Considerations
 
@@ -458,8 +516,9 @@ With block trailers, the format supports:
 
 ### 10.1 BLAKE3 Tree Structure
 
-The BLAKE3 tree structure requires careful handling. Please read the BLAKE3 paper (see section 2.1)
-and the hazmat module documentation of the Rust crate.
+The BLAKE3 tree structure requires careful handling. The power-of-2 block size requirement
+ensures that blocks align properly with BLAKE3's chunk boundaries and tree structure.
+Please read the BLAKE3 paper (see section 2.1) and the hazmat module documentation of the Rust crate.
 
 https://docs.rs/blake3/latest/blake3/hazmat/index.html
 
@@ -471,7 +530,7 @@ The format supports full streaming operation:
 - Decompression without seeking
 - Pipe-friendly operation
 
-### 10.2 Parallel Processing Benefits
+### 10.3 Parallel Processing Benefits
 
 With block trailers, the format enables:
 
@@ -480,14 +539,6 @@ With block trailers, the format enables:
 - **Parallel hashing**: No sequential hash computation bottleneck
 - **Parallel validation**: Block integrity checked independently
 
-### 10.3 Append Performance
-
-Example for a 10 GB file with 1 MB blocks (10,000 blocks):
-
-- **Without chaining values**: Read and hash 10 GB of data
-- **With chaining values**: Read 720 KB of trailers, merge trees
-- **Speedup**: ~14,000× faster
-
 ## 11. Design Rationale and Critical Analysis
 
 This section addresses potential criticisms of the Streaming-LZMA format design and explains the reasoning behind key
@@ -495,15 +546,15 @@ architectural decisions.
 
 ### 11.1 Block Trailers: The Key Innovation
 
-**Criticism**: Adding 72 bytes per block seems excessive when other formats use minimal or no per-block metadata.
+**Criticism**: Adding 64 bytes per block seems excessive when other formats use minimal or no per-block metadata.
 
 **Response**: The block trailer design represents a fundamental shift in compression format philosophy, providing
 capabilities that justify the overhead:
 
 **Transformative Benefits**:
 
-1. **O(n) Append Operations**: Traditional formats require O(m) operations where m is file size. With chaining values,
-   appending becomes O(n) where n is block count. For large archives, this changes append from impractical to instant.
+1. **Efficient Append Operations**: When the last block is full, appending is O(n) where n is block count. Even when
+   the last block requires recompression, only one block needs processing rather than the entire file.
 
 2. **True Parallel Hashing**: BLAKE3's tree structure was designed for parallelism, but most formats can't exploit it.
    Our block trailers enable linear speedup with core count for both compression and decompression.
@@ -514,16 +565,23 @@ capabilities that justify the overhead:
 4. **Granular Corruption Detection**: Instead of "file corrupt" we can report "blocks 47 and 892 corrupt, others valid".
    This enables partial recovery and targeted retransmission.
 
-**Overhead Analysis**:
+### 11.2 Power-of-2 Block Size Requirement
 
-For 1 MB blocks on a 1 TB file:
+**Criticism**: Why restrict block sizes to powers of 2? This seems unnecessarily restrictive.
 
-- Overhead: 72 MB (0.007%)
-- Benefit: 1000× faster appends, 16× faster parallel hashing
+**Response**: This requirement directly follows from BLAKE3's tree structure design:
 
-The overhead is negligible while the performance gains are transformative.
+**BLAKE3 Tree Compatibility**: BLAKE3's binary tree structure requires that left subtrees contain power-of-2
+chunks. By making our blocks align with this structure (and ensuring all non-final blocks are exactly the
+configured size), we maintain a valid BLAKE3 tree that supports:
 
-### 11.2 LZMA vs LZMA2 Decision
+- Correct chaining value computation
+- Efficient append operations
+- Proper tree merging for the root hash
+
+**Simplicity**: Power-of-2 sizes are natural for binary systems and simplify implementation logic.
+
+### 11.3 LZMA vs LZMA2 Decision
 
 **Criticism**: Why use LZMA instead of its successor LZMA2, which adds features like uncompressed chunks and better
 streaming support?
@@ -546,7 +604,7 @@ chunking redundant.
 This decision validates the approach taken by the LZIP format, which similarly chose LZMA over LZMA2 for comparable
 reasons.
 
-### 11.3 Cryptographic Hash "Overkill"
+### 11.4 Cryptographic Hash "Overkill"
 
 **Criticism**: CRC32 is sufficient for error detection in compressed formats. Cryptographic hashes add unnecessary
 complexity and computational overhead without meaningful benefit for integrity checking.
@@ -563,7 +621,7 @@ complexity and computational overhead without meaningful benefit for integrity c
 - **Audit trails**: Provides cryptographic proof of file contents for compliance and legal requirements
 - **Tamper detection**: Detects intentional manipulation, not just accidental corruption
 
-### 11.4 Reed-Solomon at Every Level
+### 11.5 Reed-Solomon at Every Level
 
 **Criticism**: Protecting every single block's hash with Reed-Solomon codes is overkill. Most corruption affects data,
 not metadata.
@@ -594,7 +652,7 @@ Combined probability: essentially impossible
 - **Network Transmission**: Can recover from packet corruption without retransmission
 - **Long-term Archive**: Provides confidence for decades-long storage
 
-### 11.5 BLAKE3's Perfect Fit
+### 11.6 BLAKE3's Perfect Fit
 
 The choice of BLAKE3 becomes even more justified with this design:
 
@@ -603,18 +661,18 @@ The choice of BLAKE3 becomes even more justified with this design:
 - **Security**: Cryptographic strength for content addressing
 - **Simplicity**: Single algorithm for both blocks and file
 
-### 11.6 Summary
+### 11.7 Summary
 
 Streaming-LZMA makes deliberate trade-offs:
 
-- **Small overhead** for considerable performance gains
+- **Small overhead** (64 bytes per block) for considerable performance gains
 - **Added complexity** for new capabilities
 - **Comprehensive protection** for strong integrity
 
 The format excels at:
 
 - Large-scale data processing (parallel everything)
-- Incremental operations (efficient append)
+- Incremental operations (efficient append when last block is full)
 - Robust integrity (five-factor validation)
 - Progressive validation (streaming verification)
 
@@ -622,7 +680,7 @@ These capabilities are to our knowledge unique in the compression format landsca
 
 - Streaming operation
 - Parallel processing at this level
-- Inexpensive append operations
+- Efficient append operations (when last block is full)
 - Per-block validation
 - Cryptographic integrity with error correction
 
@@ -669,49 +727,44 @@ specification.
 
 ### A.1 Minimal File
 
-Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 2, dictionary size log2: 16) + no prefilter and no
-content:
+Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 2, dictionary size log2: 16) + no prefilter,
+block size 2^16 (64 KiB), block size log2 of 62 and no content:
 
-```
-fedcba9801005d000000000000000000
-0000000000000000af1349b9f5f9a1a6
-a0404dea36dcc9499bcb25c9adc112b7
-cc9a93cae41f3262cedfc1cc789afb17
-6bf1fb71a6756a5b315bdbc2322f987f
-f3aa7b0c7c2a6a7d
-```
+fedcba9801003e5d1000000000000000
+000000000000000000af1349b9f5f9a1
+a6a0404dea36dcc9499bcb25c9adc112
+b7cc9a93cae41f3262cedfc1cc789afb
+176bf1fb71a6756a5b315bdbc2322f98
+7ff3aa7b0c7c2a6a7d
 
 Hexdump of a minimal Streaming-LZMA file using LZMA (lc: 3 lp: 0 pb: 2, dictionary size log2: 30) + Delta prefilter
-(distance: 32) and one zero byte as content:
+(distance: 32), block size log2 of 31 and one zero byte as content (partial block):
 
-```
-fedcba9801011f5d0e0b000000000000
-00000041fef7ffffe000800001000000
-000000002d3adedff11b61f14c886e35
-afa036736dcd87a74d27b5c1510225d0
-f592e213c213b18ea038cbd9669481d7
-382c07d10c82c200979933423a3340c2
-48382018000000000000000001000000
-000000002d3adedff11b61f14c886e35
-afa036736dcd87a74d27b5c1510225d0
-f592e213c213b18ea038cbd9669481d7
-382c07d10c82c200979933423a3340c2
-48382018
-```
+fedcba9801011f5d1e1ff5ffffffffff
+ffff000041fef7ffffe00080002d3ade
+dff11b61f14c886e35afa036736dcd87
+a74d27b5c1510225d0f592e213c213b1
+8ea038cbd9669481d7382c07d10c82c2
+00979933423a3340c248382018000000
+000000000001000000000000002d3ade
+dff11b61f14c886e35afa036736dcd87
+a74d27b5c1510225d0f592e213c213b1
+8ea038cbd9669481d7382c07d10c82c2
+00979933423a3340c248382018
 
 ### A.2 Block Chaining Example
 
-For a 3-block file, the chaining value computation:
+For a 3-block file with block size 2^16 (64 KiB), the chaining value computation:
 
 ```
-# Block 0: offset=0, size=1024
+# Block 0: offset=0, size=65536 (full block)
 cv_0 = BLAKE3(data_0, offset=0, non_root)
 
-# Block 1: offset=1024, size=1024  
-cv_1 = BLAKE3(data_1, offset=1024, non_root)
+# Block 1: offset=65536, size=65536 (full block)
+cv_1 = BLAKE3(data_1, offset=65536, non_root)
 
-#Block 2: offset=2048, size=512
-cv_2 = BLAKE3(data_2, offset=2048, non_root)
+# Block 2: offset=131072, size=512 (partial block)
+cv_2 = BLAKE3(data_2, offset=131072, non_root)
 
 root = merge_tree(cv_0, cv_1, cv_2, root=true)
 ```
@@ -801,5 +854,7 @@ Files using this format SHOULD use the extension `.slz`.
 
 ## Revision History
 
-- Version 0.4 (2025-08-17): Added block trailers with chaining values and Reed-Solomon protection
+- Version 0.4 (2025-08-17): Added block trailers with chaining values and Reed-Solomon protection;
+  Added power-of-2 block size requirement for BLAKE3 tree structure compatibility;
+  Removed uncompressed size from block trailer, using MSB flag in compressed size instead
 - Version 0.3 (2025-08-15): Initial specification

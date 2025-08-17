@@ -1,7 +1,5 @@
 mod streaming_writer;
 
-use std::num::NonZeroU64;
-
 pub use streaming_writer::SLZStreamingWriter;
 
 use crate::{
@@ -30,8 +28,9 @@ pub struct SLZOptions {
     pub(crate) mf: MFType,
     /// Match finder depth limit.
     pub(crate) depth_limit: u8,
-    /// Block size in uncompressed bytes. If None, all data will be written in one block.
-    pub(crate) block_size: Option<NonZeroU64>,
+    /// Block size as power of two exponent. If None, all data will be written in one block.
+    /// Block size = 2^exponent bytes. Valid range: 10-62 (1 KiB to 4 EiB).
+    pub(crate) block_size_exponent: Option<u8>,
 }
 
 impl Default for SLZOptions {
@@ -46,7 +45,7 @@ impl Default for SLZOptions {
             nice_len: 64,
             mf: MFType::BT4,
             depth_limit: 0,
-            block_size: None,
+            block_size_exponent: None,
         }
     }
 }
@@ -89,7 +88,7 @@ impl SLZOptions {
         let lp = 0;
         let pb = 2;
         let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[preset as usize];
-        let block_size = NonZeroU64::new(u64::MAX);
+        let block_size_exponent = None; // Single block mode
 
         let mode;
         let mf;
@@ -124,7 +123,7 @@ impl SLZOptions {
             nice_len,
             mf,
             depth_limit,
-            block_size,
+            block_size_exponent,
         }
     }
 
@@ -174,16 +173,12 @@ impl SLZOptions {
         self
     }
 
-    /// Set the block size for multi-block compression.
+    /// Set the block size exponent for multi-block compression.
     ///
-    /// Block sizes must be multiples of 1024 bytes (1 KiB) to ensure proper BLAKE3
-    /// chunk boundary alignment. The provided block size will be rounded down to the
-    /// nearest 1 KiB boundary if not already aligned.
-    pub fn with_block_size(mut self, block_size: Option<NonZeroU64>) -> Self {
-        self.block_size = block_size.map(|size| {
-            let aligned_size = (size.get() / 1024) * 1024;
-            NonZeroU64::new(aligned_size.max(1024)).unwrap()
-        });
+    /// Block size = 2^exponent bytes. Valid range: 16-62 (64 KiB to 4 EiB).
+    /// If None, all data will be written in one block.
+    pub fn with_block_size_exponent(mut self, block_size_exponent: Option<u8>) -> Self {
+        self.block_size_exponent = block_size_exponent.map(|exp| exp.clamp(16, 62));
         self
     }
 
@@ -191,5 +186,10 @@ impl SLZOptions {
     pub fn dict_size(&self) -> u32 {
         2u32.pow(self.dictionary_size_log2 as u32)
             .min(lzma::DICT_SIZE_MAX)
+    }
+
+    /// Get block size in bytes. Returns None if single-block mode.
+    pub fn block_size(&self) -> Option<u64> {
+        self.block_size_exponent.map(|exp| 2u64.pow(exp as u32))
     }
 }
