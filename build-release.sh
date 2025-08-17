@@ -8,14 +8,22 @@ cargo pgo build
 # Step 2: Download the latest Linux kernel release.
 echo "Fetching latest Linux kernel release..."
 KERNEL_URL=$(curl -s https://www.kernel.org/ | grep -Eo 'https://cdn.kernel.org/pub/linux/kernel/v[0-9]+\.x/linux-[0-9]+\.[0-9]+(\.[0-9]+)?\.tar\.xz' | head -n1)
-KERNEL_FILE="tests/data/$(basename "$KERNEL_URL")"
+KERNEL_XZ="tests/data/$(basename "$KERNEL_URL")"
+KERNEL_TAR="${KERNEL_XZ%.xz}"   # remove .xz -> .tar
 
 mkdir -p tests/data
-if [ ! -f "$KERNEL_FILE" ]; then
-    echo "Downloading $KERNEL_URL ..."
-    curl -L "$KERNEL_URL" -o "$KERNEL_FILE"
+if [ ! -f "$KERNEL_TAR" ]; then
+    if [ ! -f "$KERNEL_XZ" ]; then
+        echo "Downloading $KERNEL_URL ..."
+        curl -L "$KERNEL_URL" -o "$KERNEL_XZ"
+    else
+        echo "Compressed kernel tarball already exists: $KERNEL_XZ"
+    fi
+
+    echo "Decompressing $KERNEL_XZ ..."
+    xz --decompress --keep "$KERNEL_XZ"
 else
-    echo "Kernel tarball already exists: $KERNEL_FILE"
+    echo "Kernel tar already exists: $KERNEL_TAR"
 fi
 
 # Step 3: Detect OS and adjust binary path/extension.
@@ -51,12 +59,12 @@ if [ ! -f "$BIN" ]; then
 fi
 
 # Step 4: Run compression and decompression to create a PGO profile.
-"$BIN" --preset 7 --keep "$KERNEL_FILE"
-"$BIN" --decompress --keep "$KERNEL_FILE.slz"
+"$BIN" --preset 7 --keep "$KERNEL_TAR"
+"$BIN" --decompress --keep "$KERNEL_TAR.slz"
 
-# Step 5: Optimize with PGO.
+# Step 5: Optimize with PGO
 cargo pgo optimize
 
-# Step 6: Copy final binary to current directory.
+# Step 6: Copy final binary to current directory
 cp "$BIN" .
 echo "Final binary copied to ./$(basename "$BIN")"

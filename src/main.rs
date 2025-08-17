@@ -1,15 +1,13 @@
-use std::{
-    fs::{self, File},
-    io::{BufReader, BufWriter, Read, Result, Write},
-    num::NonZeroU64,
-    process,
-    time::Instant,
-};
+mod compression;
+mod decompression;
+mod list;
+
+use std::{fs, io::Result, process};
 
 use clap::{Arg, ArgMatches, Command, value_parser};
-use libslz::{
-    BufferedReader, Prefilter, SLZMetadata, SLZOptions, SLZStreamingReader, SLZStreamingWriter,
-};
+use libslz::Prefilter;
+
+use crate::{compression::compress_file, decompression::decompress_file, list::list_file_info};
 
 struct Cli {
     input: String,
@@ -39,6 +37,7 @@ impl Cli {
         Command::new("slz")
             .about("Compress and decompress files using the SLZ (Streaming LZMA) format")
             .version(env!("CARGO_PKG_VERSION"))
+            .arg_required_else_help(true)
             .arg(
                 Arg::new("input")
                     .help("Input file to compress or decompress")
@@ -74,14 +73,6 @@ impl Cli {
                     .short('o')
                     .long("output")
                     .value_name("FILE"),
-            )
-            .arg(
-                Arg::new("preset")
-                    .help("Compression preset level (0-9, higher is better compression)")
-                    .short('p')
-                    .long("preset")
-                    .value_parser(value_parser!(u32).range(0..=9))
-                    .default_value("6"),
             )
             .arg(
                 Arg::new("block-size")
@@ -170,16 +161,133 @@ impl Cli {
                     .value_name("N")
                     .value_parser(value_parser!(u8).range(16..=30)),
             )
+            .arg(
+                Arg::new("preset")
+                    .help("Compression preset level (0-9, higher is better compression)")
+                    .short('p')
+                    .long("preset")
+                    .value_parser(value_parser!(u32).range(0..=9))
+                    .default_value("6"),
+            )
+            .arg(
+                Arg::new("0")
+                    .help("Compression preset level 0 (fastest)")
+                    .short('0')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "1", "2", "3", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("1")
+                    .help("Compression preset level 1")
+                    .short('1')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "2", "3", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("2")
+                    .help("Compression preset level 2")
+                    .short('2')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "3", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("3")
+                    .help("Compression preset level 3")
+                    .short('3')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("4")
+                    .help("Compression preset level 4")
+                    .short('4')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "5", "6", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("5")
+                    .help("Compression preset level 5")
+                    .short('5')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "6", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("6")
+                    .help("Compression preset level 6 (default)")
+                    .short('6')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "7", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("7")
+                    .help("Compression preset level 7")
+                    .short('7')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "8", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("8")
+                    .help("Compression preset level 8")
+                    .short('8')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "9", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("9")
+                    .help("Compression preset level 9 (best compression)")
+                    .short('9')
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "fastest", "best"]),
+            )
+            .arg(
+                Arg::new("fastest")
+                    .help("Fastest compression (same as -0)")
+                    .long("fastest")
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "best"]),
+            )
+            .arg(
+                Arg::new("best")
+                    .help("Best compression (same as -9)")
+                    .long("best")
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "fastest"]),
+            )
     }
 
     fn from_matches(matches: &ArgMatches) -> Self {
+        // Determine preset from shorthand flags or explicit preset.
+        let preset = if matches.get_flag("0") || matches.get_flag("fastest") {
+            0
+        } else if matches.get_flag("1") {
+            1
+        } else if matches.get_flag("2") {
+            2
+        } else if matches.get_flag("3") {
+            3
+        } else if matches.get_flag("4") {
+            4
+        } else if matches.get_flag("5") {
+            5
+        } else if matches.get_flag("6") {
+            6
+        } else if matches.get_flag("7") {
+            7
+        } else if matches.get_flag("8") {
+            8
+        } else if matches.get_flag("9") || matches.get_flag("best") {
+            9
+        } else {
+            *matches.get_one::<u32>("preset").unwrap()
+        };
+
         Self {
             input: matches.get_one::<String>("input").unwrap().clone(),
             output: matches.get_one::<String>("output").cloned(),
             extract: matches.get_flag("extract"),
             list: matches.get_flag("list"),
             keep: matches.get_flag("keep"),
-            preset: *matches.get_one::<u32>("preset").unwrap(),
+            preset,
             block_size: matches.get_one::<u64>("block-size").copied(),
             x86: matches.get_flag("x86"),
             arm: matches.get_flag("arm"),
@@ -259,13 +367,13 @@ fn main() -> Result<()> {
     let cli = Cli::from_matches(&matches);
 
     if cli.list {
-        // List mode - show metadata
+        // List mode - show metadata.
         if let Err(error) = list_file_info(&cli) {
             eprintln!("Error: {error}");
             process::exit(1);
         }
     } else if cli.extract {
-        // Extraction mode
+        // Extraction mode.
         let output_filename = cli.output.clone().unwrap_or_else(|| {
             if cli.input.ends_with(".slz") {
                 cli.input[..cli.input.len() - 4].to_string()
@@ -303,12 +411,12 @@ fn main() -> Result<()> {
         println!("Decompression speed: {speed_mibs:.1} MiB/s");
 
         if !cli.keep
-            && let Err(error) = remove_input_file(&cli.input)
+            && let Err(error) = fs::remove_file(&cli.input)
         {
             eprintln!("Warning: Failed to remove input file: {error}");
         }
     } else {
-        // Compression mode
+        // Compression mode.
         let output_filename = cli
             .output
             .clone()
@@ -343,186 +451,11 @@ fn main() -> Result<()> {
         println!("Compression speed: {speed_mibs:.1} MiB/s");
 
         if !cli.keep
-            && let Err(error) = remove_input_file(&cli.input)
+            && let Err(error) = fs::remove_file(&cli.input)
         {
             eprintln!("Warning: Failed to remove input file: {error}");
         }
     }
 
     Ok(())
-}
-
-fn compress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::Duration)> {
-    let input_file = File::open(&cli.input)?;
-    let mut input_reader = BufReader::with_capacity(65536, input_file);
-
-    let output_file = File::create(output_path)?;
-    let output_writer = BufWriter::with_capacity(65536, output_file);
-
-    let mut options = SLZOptions::from_preset(cli.preset);
-
-    let prefilter = cli.get_prefilter()?;
-    options = options.with_prefilter(prefilter);
-
-    if let Some(lc) = cli.lc {
-        options = options.with_lc(lc);
-    }
-    if let Some(lp) = cli.lp {
-        options = options.with_lp(lp);
-    }
-    if let Some(pb) = cli.pb {
-        options = options.with_pb(pb);
-    }
-    if let Some(dict_size) = cli.dict_size {
-        options = options.with_dictionary_size(dict_size);
-    }
-    if let Some(block_size) = cli.block_size {
-        options = options.with_block_size(NonZeroU64::new(block_size));
-    }
-
-    let mut slz_writer = SLZStreamingWriter::new(output_writer, options);
-
-    let start_time = Instant::now();
-
-    let mut buffer = vec![0u8; 65536];
-    let mut bytes_read = 0u64;
-
-    loop {
-        match input_reader.read(&mut buffer)? {
-            0 => break,
-            n => {
-                slz_writer.write_all(&buffer[..n])?;
-                bytes_read += n as u64;
-            }
-        }
-    }
-    slz_writer.finish()?;
-
-    let elapsed = start_time.elapsed();
-
-    let compressed_size = fs::metadata(output_path)?.len();
-
-    Ok((bytes_read, compressed_size, elapsed))
-}
-
-fn decompress_file(cli: &Cli, output_path: &str) -> Result<(u64, u64, std::time::Duration)> {
-    let input_file = File::open(&cli.input)?;
-    let compressed_size = input_file.metadata()?.len();
-
-    let reader = BufferedReader::new(input_file)?;
-    let mut slz_reader = SLZStreamingReader::new(reader, true);
-
-    let output_file = File::create(output_path)?;
-    let mut output_writer = BufWriter::with_capacity(65536, output_file);
-
-    let start_time = Instant::now();
-
-    let mut buffer = vec![0u8; 65536];
-    let mut total_written = 0u64;
-
-    loop {
-        match slz_reader.read(&mut buffer)? {
-            0 => break,
-            n => {
-                output_writer.write_all(&buffer[..n])?;
-                total_written += n as u64;
-            }
-        }
-    }
-
-    output_writer.flush()?;
-    let elapsed = start_time.elapsed();
-
-    Ok((compressed_size, total_written, elapsed))
-}
-
-fn remove_input_file(input_path: &str) -> Result<()> {
-    fs::remove_file(input_path)?;
-    Ok(())
-}
-
-fn list_file_info(cli: &Cli) -> Result<()> {
-    let input_file = File::open(&cli.input)?;
-    let metadata = SLZMetadata::parse(input_file)?;
-
-    println!("Archive: {}", cli.input);
-    println!("  Format version: 1");
-    println!("  Prefilter: {}", format_prefilter(&metadata.prefilter));
-    println!("  LZMA properties:");
-    println!("    Literal context bits (lc): {}", metadata.lc);
-    println!("    Literal position bits (lp): {}", metadata.lp);
-    println!("    Position bits (pb): {}", metadata.pb);
-    println!(
-        "    Dictionary size: {} bytes ({:.1} MiB)",
-        metadata.dict_size,
-        metadata.dict_size as f64 / (1024.0 * 1024.0)
-    );
-    println!("  Structure:");
-    println!("    Block count: {}", metadata.block_count);
-    if metadata.block_count > 0 {
-        let avg_block_size = metadata.compressed_size / metadata.block_count as u64;
-        println!(
-            "    Average block size: {} bytes ({:.1} KiB)",
-            avg_block_size,
-            avg_block_size as f64 / 1024.0
-        );
-    }
-    println!("  Sizes:");
-    println!(
-        "    Uncompressed size: {} bytes ({:.1} MiB)",
-        metadata.uncompressed_size,
-        metadata.uncompressed_size as f64 / (1024.0 * 1024.0)
-    );
-    println!(
-        "    Compressed size: {} bytes ({:.1} MiB)",
-        metadata.compressed_size,
-        metadata.compressed_size as f64 / (1024.0 * 1024.0)
-    );
-    if metadata.uncompressed_size > 0 {
-        println!(
-            "    Compression ratio: {:.2}%",
-            (metadata.compressed_size as f64 / metadata.uncompressed_size as f64) * 100.0
-        );
-        if metadata.compressed_size <= metadata.uncompressed_size {
-            println!(
-                "    Space saved: {:.2}%",
-                ((metadata.uncompressed_size - metadata.compressed_size) as f64
-                    / metadata.uncompressed_size as f64)
-                    * 100.0
-            );
-        } else {
-            println!(
-                "    Space overhead: {:.2}%",
-                ((metadata.compressed_size - metadata.uncompressed_size) as f64
-                    / metadata.uncompressed_size as f64)
-                    * 100.0
-            );
-        }
-    }
-    println!("  Integrity:");
-    println!("    Blake3 hash: {}", format_hex(&metadata.blake3_hash));
-    println!("    RS parity: {}", format_hex(&metadata.rs_parity));
-    println!("    Hash validated: {}", metadata.validated);
-    println!("    Hash corrected: {}", metadata.corrected);
-
-    Ok(())
-}
-
-fn format_prefilter(prefilter: &Prefilter) -> String {
-    match prefilter {
-        Prefilter::None => "None".to_string(),
-        Prefilter::Delta { distance } => format!("Delta (distance: {})", distance),
-        Prefilter::BcjX86 => "BCJ x86".to_string(),
-        Prefilter::BcjArm => "BCJ ARM".to_string(),
-        Prefilter::BcjArmThumb => "BCJ ARM Thumb".to_string(),
-        Prefilter::BcjArm64 => "BCJ ARM64".to_string(),
-        Prefilter::BcjSparc => "BCJ SPARC".to_string(),
-        Prefilter::BcjPowerPc => "BCJ PowerPC".to_string(),
-        Prefilter::BcjIa64 => "BCJ IA-64".to_string(),
-        Prefilter::BcjRiscV => "BCJ RISC-V".to_string(),
-    }
-}
-
-fn format_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
