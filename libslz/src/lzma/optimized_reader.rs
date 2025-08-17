@@ -24,6 +24,7 @@ pub trait OptimizedReader: Read {
         }
     }
 
+    /// Try to read a single byte, returning an error on EOF.
     #[inline(always)]
     fn try_read_u8(&mut self) -> crate::Result<u8> {
         let mut buf = [0; 1];
@@ -31,6 +32,7 @@ pub trait OptimizedReader: Read {
         Ok(buf[0])
     }
 
+    /// Try to read a big-endian u32, returning an error on EOF.
     #[inline(always)]
     fn try_read_u32_be(&mut self) -> crate::Result<u32> {
         let mut buf = [0; 4];
@@ -38,6 +40,7 @@ pub trait OptimizedReader: Read {
         Ok(u32::from_be_bytes(buf))
     }
 
+    /// Try to read a little-endian u32, returning an error on EOF.
     #[inline(always)]
     fn try_read_u32(&mut self) -> crate::Result<u32> {
         let mut buf = [0; 4];
@@ -45,6 +48,7 @@ pub trait OptimizedReader: Read {
         Ok(u32::from_le_bytes(buf))
     }
 
+    /// Try to read a little-endian u64, returning an error on EOF.
     #[inline(always)]
     fn try_read_u64(&mut self) -> crate::Result<u64> {
         let mut buf = [0; 8];
@@ -52,21 +56,25 @@ pub trait OptimizedReader: Read {
         Ok(u64::from_le_bytes(buf))
     }
 
+    /// Returns true if this reader operates on an in-memory buffer.
     #[inline(always)]
     fn is_buffer(&self) -> bool {
         false
     }
 
+    /// Get current position in the buffer (only valid for buffer readers).
     #[inline(always)]
     fn pos(&self) -> usize {
         unimplemented!("not a buffer reader")
     }
 
+    /// Set current position in the buffer (only valid for buffer readers).
     #[inline(always)]
     fn set_pos(&mut self, _pos: usize) {
         unimplemented!("not a buffer reader")
     }
 
+    /// Get reference to the underlying buffer (only valid for buffer readers).
     #[inline(always)]
     fn buf(&self) -> &[u8] {
         unimplemented!("not a buffer reader")
@@ -77,11 +85,13 @@ pub trait OptimizedReader: Read {
 pub struct IoReader<R: Read>(R);
 
 impl<R: Read> IoReader<R> {
+    /// Create a new IoReader wrapping the given reader.
     #[inline(always)]
     pub fn new(reader: R) -> Self {
         Self(reader)
     }
 
+    /// Extract the inner reader.
     #[inline(always)]
     pub fn into_inner(self) -> R {
         self.0
@@ -104,11 +114,13 @@ pub struct SliceReader<'a> {
 }
 
 impl<'a> SliceReader<'a> {
+    /// Create a new SliceReader operating on the given slice.
     #[inline(always)]
     pub fn new(slice: &'a [u8]) -> Self {
         Self { slice, pos: 0 }
     }
 
+    /// Extract the underlying slice.
     #[inline(always)]
     pub fn into_inner(self) -> &'a [u8] {
         self.slice
@@ -174,11 +186,8 @@ impl<'a> OptimizedReader for SliceReader<'a> {
 pub struct BufferedReader<R> {
     reader: R,
     buffer: Vec<u8>,
-    /// Current read position in buffer
     pos: usize,
-    /// How much of buffer contains valid data
     filled: usize,
-    /// Whether underlying reader reached EOF
     eof: bool,
 }
 
@@ -186,6 +195,7 @@ impl<R: Read> BufferedReader<R> {
     const BUFFER_SIZE: usize = 2 * 65536;
     const REFILL_THRESHOLD: usize = 65536;
 
+    /// Create a new BufferedReader with the given reader, pre-filling the buffer.
     pub fn new(mut reader: R) -> crate::Result<Self> {
         let mut buffer = vec![0u8; Self::BUFFER_SIZE];
         let mut filled = 0;
@@ -221,6 +231,7 @@ impl<R: Read> BufferedReader<R> {
         })
     }
 
+    /// Extract the inner reader.
     pub fn into_inner(self) -> R {
         self.reader
     }
@@ -243,7 +254,7 @@ impl<R: Read> BufferedReader<R> {
         self.refill_buffer()
     }
 
-    /// Refills the buffer, compacting if necessary
+    /// Refills the buffer, compacting if necessary.
     fn refill_buffer(&mut self) -> crate::Result<()> {
         if self.eof {
             return Ok(());
@@ -260,7 +271,7 @@ impl<R: Read> BufferedReader<R> {
             self.pos = 0;
         }
 
-        // Try to fill the rest with the buffer
+        // Try to fill the rest with the buffer.
         while self.filled < self.buffer.len() {
             match self.reader.read(&mut self.buffer[self.filled..]) {
                 Ok(0) => {

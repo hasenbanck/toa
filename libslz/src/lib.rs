@@ -1,3 +1,19 @@
+//! Streaming LZMA (SLZ)
+//!
+//! Rust implementation of an experimental compression file format using LZMA which is optimized for streaming and parallel
+//! processing.
+//!
+//! ## Acknowledgement
+//!
+//! - The lzma code is a hard copy of the lzma-rust crate (Apache 2 license).
+//! - Original Author of the lzma-rust crate was dyz1990 (Apache 2 license)
+//! - The lzma-rust2 crate was a rewrite of the XZ for Java by Lasse Collin (0BSD).
+//! - Major parts of XZ for Java are based on code written by Igor Pavlov in the LZMA SDK (public domain).
+//!
+//! ## License
+//!
+//! Licensed under the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+#![forbid(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -47,6 +63,8 @@ const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
 
 const SLZ_VERSION: u8 = 0x01;
 
+/// Prefilter types that can be applied before LZMA compression to improve compression ratios
+/// for specific data types like executable files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Prefilter {
     /// No prefilter
@@ -56,13 +74,21 @@ pub enum Prefilter {
         /// Filter distance (must be 1..=256)
         distance: u16,
     },
+    /// BCJ filter for x86 (32-bit and 64-bit) executables
     BcjX86,
+    /// BCJ filter for ARM executables
     BcjArm,
+    /// BCJ filter for ARM Thumb executables
     BcjArmThumb,
+    /// BCJ filter for ARM64 executables
     BcjArm64,
+    /// BCJ filter for SPARC executables
     BcjSparc,
+    /// BCJ filter for PowerPC executables
     BcjPowerPc,
+    /// BCJ filter for IA-64 executables
     BcjIa64,
+    /// BCJ filter for RISC-V executables
     BcjRiscV,
 }
 

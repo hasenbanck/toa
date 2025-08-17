@@ -53,16 +53,16 @@ impl Default for SLZOptions {
 
 impl SLZOptions {
     const PRESET_TO_DICT_SIZE_LOG2: &'static [u8] = &[
-        18, // 256 KiB
+        19, // 512 KiB
         20, // 1 MiB
         21, // 2 MiB
         22, // 4 MiB
-        22, // 4 MiB
-        23, // 8 MiB
         23, // 8 MiB
         24, // 16 MiB
         25, // 32 MiB
         26, // 64 MiB
+        27, // 128 MiB
+        28, // 256 MiB
     ];
 
     const PRESET_TO_DEPTH_LIMIT: &'static [u8] = &[4, 8, 24, 48];
