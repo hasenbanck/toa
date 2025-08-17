@@ -10,11 +10,21 @@ use libslz::{SLZOptions, SLZStreamingWriter};
 
 use crate::Cli;
 
+fn calculate_block_size(file_size: u64, block_count: u64) -> Option<NonZeroU64> {
+    if block_count == 0 {
+        return None;
+    }
+
+    let block_size = file_size.div_ceil(block_count);
+    NonZeroU64::new(block_size.max(1))
+}
+
 pub(crate) fn compress_file(
     cli: &Cli,
     output_path: &str,
 ) -> std::io::Result<(u64, u64, std::time::Duration)> {
     let input_file = File::open(&cli.input)?;
+    let file_size = input_file.metadata()?.len();
     let mut input_reader = BufReader::with_capacity(65536, input_file);
 
     let output_file = File::create(output_path)?;
@@ -39,6 +49,9 @@ pub(crate) fn compress_file(
     }
     if let Some(block_size) = cli.block_size {
         options = options.with_block_size(NonZeroU64::new(block_size));
+    } else if let Some(block_count) = cli.block_count {
+        let calculated_block_size = calculate_block_size(file_size, block_count);
+        options = options.with_block_size(calculated_block_size);
     }
 
     let mut slz_writer = SLZStreamingWriter::new(output_writer, options);

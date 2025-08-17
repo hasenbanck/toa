@@ -18,6 +18,7 @@ struct Cli {
     verbose: bool,
     preset: u32,
     block_size: Option<u64>,
+    block_count: Option<u64>,
     x86: bool,
     arm: bool,
     armthumb: bool,
@@ -87,7 +88,16 @@ impl Cli {
                     .help("Block size in uncompressed bytes")
                     .long("block-size")
                     .value_name("bytes")
-                    .value_parser(value_parser!(u64).range(1..=18446744073709551615)),
+                    .value_parser(value_parser!(u64).range(1..=18446744073709551615))
+                    .conflicts_with("block-count"),
+            )
+            .arg(
+                Arg::new("block-count")
+                    .help("Number of blocks to divide the file into (calculates block size automatically)")
+                    .long("block-count")
+                    .value_name("count")
+                    .value_parser(value_parser!(u64).range(1..=18446744073709551615))
+                    .conflicts_with("block-size"),
             )
             .arg(
                 Arg::new("x86")
@@ -298,6 +308,7 @@ impl Cli {
             verbose: matches.get_flag("verbose"),
             preset,
             block_size: matches.get_one::<u64>("block-size").copied(),
+            block_count: matches.get_one::<u64>("block-count").copied(),
             x86: matches.get_flag("x86"),
             arm: matches.get_flag("arm"),
             armthumb: matches.get_flag("armthumb"),
