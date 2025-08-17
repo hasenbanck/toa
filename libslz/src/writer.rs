@@ -53,21 +53,34 @@ impl Default for SLZOptions {
 
 impl SLZOptions {
     const PRESET_TO_DICT_SIZE_LOG2: &'static [u8] = &[
-        19, // 512 KiB
-        20, // 1 MiB
-        21, // 2 MiB
-        22, // 4 MiB
-        23, // 8 MiB
-        24, // 16 MiB
-        25, // 32 MiB
-        26, // 64 MiB
-        27, // 128 MiB
-        28, // 256 MiB
+        19, // (0) 512 KiB
+        20, // (1) 1 MiB
+        21, // (2) 2 MiB
+        22, // (3) 4 MiB
+        23, // (4) 8 MiB
+        24, // (5) 16 MiB
+        25, // (6) 32 MiB
+        26, // (7) 64 MiB
+        27, // (8) 128 MiB
+        28, // (9) 256 MiB
     ];
 
     const PRESET_TO_DEPTH_LIMIT: &'static [u8] = &[4, 8, 24, 48];
 
     /// Create options with a specific preset level (0-9).
+    ///
+    /// # Dictionary size
+    ///
+    ///  - Preset 0: 512 KiB
+    ///  - Preset 1:   1 MiB
+    ///  - Preset 2:   2 MiB
+    ///  - Preset 3:   4 MiB
+    ///  - Preset 4:   8 MiB
+    ///  - Preset 5:  16 MiB
+    ///  - Preset 6:  32 MiB
+    ///  - Preset 7:  64 MiB
+    ///  - Preset 8: 128 MiB
+    ///  - Preset 9: 256 MiB
     pub fn from_preset(preset: u32) -> Self {
         let preset = preset.min(9);
 
