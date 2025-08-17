@@ -1,25 +1,23 @@
 [workspace]
-members = [".", "libslz"]
+members = ["libslz"]
 resolver = "2"
 
 [workspace.dependencies]
 clap = { version = "4", default-features = false, features = ["std", "help"] }
 blake3 = { version = "1" }
 hex-literal = "1"
-criterion = { version = "0.7", features = ["html_reports"] }
-liblzma = { version = "0.4", features = ["static"] }
 
 [package]
 name = "slz"
 description = "Streaming LZMA compression command-line tool"
 homepage = "https://github.com/hasenbanck/slz/"
 repository = "https://github.com/hasenbanck/slz/"
-documentation = "https://docs.rs/slz/latest/slz/"
 license = "Apache-2.0"
 version = "0.1.0"
 keywords = ["lzma", "slz", "compression"]
 edition = "2024"
 rust-version = "1.89"
+exclude = ["tests/data/"]
 
 [[bin]]
 name = "slz"
@@ -29,9 +27,12 @@ path = "src/main.rs"
 libslz = { version = "0.1", features = ["std"], path = "libslz" }
 clap = { workspace = true }
 
-[dev-dependencies]
-criterion = { workspace = true }
-
-[[bench]]
-name = "comparison"
-harness = false
+# Activate this block section if you want to run benchmark.
+# criterion = { version = "0.7", features = ["html_reports"] }
+#
+#[dev-dependencies]
+#criterion = { workspace = true }
+#
+#[[bench]]
+#name = "comparison"
+#harness = false
