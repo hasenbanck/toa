@@ -6,3 +6,5 @@
 /tests/data/*.slz
 /tests/data/*.iso
 /tests/data/*.exe
+slz
+*.exe
