@@ -2,7 +2,7 @@ use std::fs::File;
 
 use libslz::{Prefilter, SLZMetadata};
 
-use crate::Cli;
+use crate::{Cli, util::format_size};
 
 pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
     let input_file = File::open(&cli.input)?;
@@ -16,30 +16,23 @@ pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
     println!("    Literal position bits (lp): {}", metadata.lp);
     println!("    Position bits (pb): {}", metadata.pb);
     println!(
-        "    Dictionary size: {} bytes ({:.1} MiB)",
-        metadata.dict_size,
-        metadata.dict_size as f64 / (1024.0 * 1024.0)
+        "    Dictionary size: {}",
+        format_size(metadata.dict_size.into())
     );
     println!("  Structure:");
     println!("    Block count: {}", metadata.block_count);
     if metadata.block_count > 0 {
         let avg_block_size = metadata.compressed_size / metadata.block_count;
-        println!(
-            "    Average block size: {} bytes ({:.1} KiB)",
-            avg_block_size,
-            avg_block_size as f64 / 1024.0
-        );
+        println!("    Average block size: {}", format_size(avg_block_size));
     }
     println!("  Sizes:");
     println!(
-        "    Uncompressed size: {} bytes ({:.1} MiB)",
-        metadata.uncompressed_size,
-        metadata.uncompressed_size as f64 / (1024.0 * 1024.0)
+        "    Uncompressed size: {}",
+        format_size(metadata.uncompressed_size)
     );
     println!(
-        "    Compressed size: {} bytes ({:.1} MiB)",
-        metadata.compressed_size,
-        metadata.compressed_size as f64 / (1024.0 * 1024.0)
+        "    Compressed size: {}",
+        format_size(metadata.compressed_size)
     );
     if metadata.uncompressed_size > 0 {
         println!(

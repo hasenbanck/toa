@@ -1,7 +1,21 @@
-//! Streaming LZMA (SLZ)
+//! # Streaming-LZMA (SLZ) Compression
 //!
-//! Rust implementation of an experimental compression file format using LZMA which is optimized for streaming and parallel
-//! processing.
+//! Implementation of an experimental compression file format using LZMA optimized for streaming and parallel processing.
+//!
+//! **Note: The SLZ format is currently in draft mode (v0.3) and not yet frozen. The specification may change in future
+//! versions.**
+//!
+//! ## Overview
+//!
+//! SLZ (Streaming-LZMA) is designed for scenarios where traditional compression formats fall short. The format provides:
+//!
+//! - **Streaming operation**: Read data sequentially without seeks, random access or buffering (Writing needs buffering)
+//! - **Parallel processing**: Independent blocks enable concurrent decompression for improved performance
+//! - **Data integrity**: Blake3 hashing which is protected by error correction (Reed-Solomon)
+//!
+//! SLZ main selling point is its easily parallelization, especially when decompressing, and it's strong data protection by
+//! an innovative usage of a strong cryptographic hash function (blake3) and the elimination of false positives in the form
+//! of error correcting the content hash with the help of a Reed-Solomon error correction.
 //!
 //! ## Acknowledgement
 //!

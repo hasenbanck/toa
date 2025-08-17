@@ -1,13 +1,17 @@
 mod compression;
 mod decompression;
 mod list;
+mod util;
 
 use std::{fs, io::Result, process};
 
 use clap::{Arg, ArgMatches, Command, value_parser};
 use libslz::Prefilter;
 
-use crate::{compression::compress_file, decompression::decompress_file, list::list_file_info};
+use crate::{
+    compression::compress_file, decompression::decompress_file, list::list_file_info,
+    util::format_size,
+};
 
 struct Cli {
     input: String,
@@ -418,8 +422,8 @@ fn main() -> Result<()> {
                 0.0
             };
 
-            println!("Compressed:   {compressed_size} bytes");
-            println!("Uncompressed: {uncompressed_size} bytes");
+            println!("Compressed:   {}", format_size(compressed_size));
+            println!("Uncompressed: {}", format_size(uncompressed_size));
             println!(
                 "Compression ratio: {:.2}% bytes",
                 if uncompressed_size > 0 {
@@ -460,8 +464,8 @@ fn main() -> Result<()> {
                 0.0
             };
 
-            println!("Compressed:   {compressed_size} bytes");
-            println!("Uncompressed: {uncompressed_size} bytes");
+            println!("Compressed:   {}", format_size(compressed_size));
+            println!("Uncompressed: {}", format_size(uncompressed_size));
             println!(
                 "Compression ratio: {:.2}% bytes",
                 if uncompressed_size > 0 {
