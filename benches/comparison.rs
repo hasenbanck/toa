@@ -5,10 +5,9 @@ use std::{
 };
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use liblzma::bufread::*;
-use slz::{SLZOptions, SLZStreamingReader, SLZStreamingWriter, SliceReader};
+use libslz::{SLZOptions, SLZStreamingReader, SLZStreamingWriter, SliceReader};
 
-static TEST_DATA: &[u8] = include_bytes!("../tests/data/executable.exe");
+static TEST_DATA: &[u8] = include_bytes!("../tests/data/wget-x86");
 
 fn bench_compression(c: &mut Criterion) {
     let mut group = c.benchmark_group("compression");
@@ -29,17 +28,6 @@ fn bench_compression(c: &mut Criterion) {
                 black_box(slz_compressed)
             });
         });
-
-        group.bench_with_input(BenchmarkId::new("xz", preset), &preset, |b, &level| {
-            b.iter(|| {
-                let mut xz_compressed = Vec::new();
-                let mut encoder = XzEncoder::new(black_box(TEST_DATA), level);
-                encoder
-                    .read_to_end(black_box(&mut xz_compressed))
-                    .expect("read_to_end failed");
-                black_box(xz_compressed)
-            });
-        });
     }
 
     group.finish();
@@ -51,26 +39,14 @@ fn bench_decompression(c: &mut Criterion) {
     group.sample_size(100);
 
     let mut slz_data = Vec::new();
-    let mut xz_data = Vec::new();
 
     for preset in 0..=9 {
-        {
-            let option = SLZOptions::from_preset(preset);
-            let mut compressed = Vec::new();
-            let mut writer = SLZStreamingWriter::new(&mut compressed, option);
-            writer.write_all(TEST_DATA).expect("write_all failed");
-            writer.finish().expect("finish failed");
-            slz_data.push(compressed);
-        }
-
-        {
-            let mut compressed = Vec::new();
-            let mut encoder = XzEncoder::new(TEST_DATA, preset);
-            encoder
-                .read_to_end(black_box(&mut compressed))
-                .expect("read_to_end failed");
-            xz_data.push(compressed);
-        }
+        let option = SLZOptions::from_preset(preset);
+        let mut compressed = Vec::new();
+        let mut writer = SLZStreamingWriter::new(&mut compressed, option);
+        writer.write_all(TEST_DATA).expect("write_all failed");
+        writer.finish().expect("finish failed");
+        slz_data.push(compressed);
     }
 
     for level in 0..=9 {
@@ -91,24 +67,10 @@ fn bench_decompression(c: &mut Criterion) {
                 });
             },
         );
-
-        group.bench_with_input(
-            BenchmarkId::new("xz", level),
-            &xz_data[level],
-            |b, compressed| {
-                b.iter(|| {
-                    let mut uncompressed = Vec::new();
-                    let mut r = XzDecoder::new(black_box(compressed.as_slice()));
-                    r.read_to_end(black_box(&mut uncompressed))
-                        .expect("read_to_end failed");
-                    black_box(uncompressed)
-                });
-            },
-        );
     }
 
     group.finish();
 }
 
-criterion_group!(benches, /*bench_compression,*/ bench_decompression,);
+criterion_group!(benches, bench_compression, bench_decompression,);
 criterion_main!(benches);

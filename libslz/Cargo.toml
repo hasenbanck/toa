@@ -1,0 +1,28 @@
+[package]
+name = "libslz"
+description = "Streaming LZMA compression library"
+homepage = "https://github.com/hasenbanck/slz/"
+repository = "https://github.com/hasenbanck/slz/"
+documentation = "https://docs.rs/libslz/latest/libslz/"
+license = "Apache-2.0"
+version = "0.1.0"
+keywords = ["lzma", "slz", "compression", "streaming"]
+edition = "2024"
+rust-version = "1.89"
+
+[dependencies]
+blake3 = { workspace = true }
+
+[dev-dependencies]
+hex-literal = { workspace = true }
+
+[features]
+default = ["std", "optimization"]
+# Used to support std. Deactivating this feature makes this crate no_std compatible.
+std = []
+# Activates some optimizations that can't express in safe Rust alone.
+optimization = ["std"]
+
+[package.metadata.docs.rs]
+features = ["blake3", "std", "optimization"]
+rustdoc-args = ["--cfg", "docsrs"]

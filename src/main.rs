@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::{Arg, ArgMatches, Command, value_parser};
-use slz::{
+use libslz::{
     BufferedReader, Prefilter, SLZMetadata, SLZOptions, SLZStreamingReader, SLZStreamingWriter,
 };
 

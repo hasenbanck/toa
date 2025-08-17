@@ -297,137 +297,137 @@ mod tests {
 
     #[test]
     fn test_bcj_x86_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-x86").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-x86");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_x86(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_x86(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_arm_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-arm").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-arm");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_arm(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_arm(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_arm64_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-arm64").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-arm64");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_arm64(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_arm64(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_arm_thumb_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-arm-thumb").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-arm-thumb");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_arm_thumb(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_arm_thumb(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_ppc_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-ppc").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-ppc");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_ppc(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_ppc(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_sparc_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-sparc").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-sparc");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_sparc(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_sparc(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_ia64_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-ia64").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-ia64");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_ia64(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_ia64(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 
     #[test]
     fn test_bcj_riscv_roundtrip() {
-        let test_data = std::fs::read("tests/data/wget-riscv").unwrap();
+        let test_data = include_bytes!("../../../../tests/data/wget-riscv");
 
         let mut encoded_buffer = Vec::new();
         let mut writer = BCJWriter::new_riscv(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
 
-        assert!(test_data != encoded_buffer);
+        assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
         let mut reader = BCJReader::new_riscv(Cursor::new(&encoded_buffer), 0);
         copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data == decoded_data);
+        assert!(test_data.as_slice() == decoded_data.as_slice());
     }
 }

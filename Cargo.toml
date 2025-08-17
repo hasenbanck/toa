@@ -1,40 +1,37 @@
+[workspace]
+members = [".", "libslz"]
+resolver = "2"
+
+[workspace.dependencies]
+clap = { version = "4", default-features = false, features = ["std", "help"] }
+blake3 = { version = "1" }
+hex-literal = "1"
+criterion = { version = "0.7", features = ["html_reports"] }
+liblzma = { version = "0.4", features = ["static"] }
+
 [package]
 name = "slz"
-description = "Streaming LZMA compression"
+description = "Streaming LZMA compression command-line tool"
 homepage = "https://github.com/hasenbanck/slz/"
 repository = "https://github.com/hasenbanck/slz/"
-documentation = "https://https://docs.rs/lzma/latest/slz/"
+documentation = "https://docs.rs/slz/latest/slz/"
 license = "Apache-2.0"
 version = "0.1.0"
-keywords = ["lzma", "slz"]
+keywords = ["lzma", "slz", "compression"]
 edition = "2024"
 rust-version = "1.89"
 
 [[bin]]
 name = "slz"
-path = "src/bin/slz.rs"
-required-features = ["std"]
+path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", default-features = false, features = ["std", "help"] }
-blake3 = { version = "1" }
+libslz = { version = "0.1", features = ["std"], path = "libslz" }
+clap = { workspace = true }
 
 [dev-dependencies]
-hex-literal = "1"
-criterion = { version = "0.7", features = ["html_reports"] }
-liblzma = { version = "0.4", features = ["static"] }
-
-[features]
-default = ["std", "optimization"]
-# Used to support std. Deactivating this feature makes this crate no_std compatible.
-std = []
-# Activates some optimizations that can't express in safe Rust alone.
-optimization = ["std"]
+criterion = { workspace = true }
 
 [[bench]]
 name = "comparison"
 harness = false
-
-[package.metadata.docs.rs]
-features = ["blake3", "std", "optimization"]
-rustdoc-args = ["--cfg", "docsrs"]
