@@ -16,7 +16,9 @@ fn calculate_block_size(file_size: u64, block_count: u64) -> Option<NonZeroU64> 
     }
 
     let block_size = file_size.div_ceil(block_count);
-    NonZeroU64::new(block_size.max(1))
+    // Align to 1 KiB boundary, ensuring minimum of 1024 bytes
+    let aligned_size = ((block_size + 1023) / 1024) * 1024;
+    NonZeroU64::new(aligned_size.max(1024))
 }
 
 pub(crate) fn compress_file(

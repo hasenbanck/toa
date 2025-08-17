@@ -175,8 +175,15 @@ impl SLZOptions {
     }
 
     /// Set the block size for multi-block compression.
+    ///
+    /// Block sizes must be multiples of 1024 bytes (1 KiB) to ensure proper BLAKE3
+    /// chunk boundary alignment. The provided block size will be rounded down to the
+    /// nearest 1 KiB boundary if not already aligned.
     pub fn with_block_size(mut self, block_size: Option<NonZeroU64>) -> Self {
-        self.block_size = block_size;
+        self.block_size = block_size.map(|size| {
+            let aligned_size = (size.get() / 1024) * 1024;
+            NonZeroU64::new(aligned_size.max(1024)).unwrap()
+        });
         self
     }
 

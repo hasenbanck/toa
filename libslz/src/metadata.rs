@@ -112,7 +112,8 @@ impl SLZMetadata {
             compressed_size += block_size;
             block_count += 1;
 
-            reader.seek(SeekFrom::Current(block_size as i64))?;
+            // Skip the compressed data and the 72-byte block trailer
+            reader.seek(SeekFrom::Current(block_size as i64 + 72))?;
         }
 
         // 72 bytes for trailer

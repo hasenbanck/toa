@@ -6,6 +6,7 @@ use crate::{Cli, util::format_size};
 
 pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
     let input_file = File::open(&cli.input)?;
+    let compressed_size = input_file.metadata()?.len();
     let metadata = SLZMetadata::parse(input_file)?;
 
     println!("Archive: {}", cli.input);
@@ -30,26 +31,23 @@ pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
         "    Uncompressed size: {}",
         format_size(metadata.uncompressed_size)
     );
-    println!(
-        "    Compressed size: {}",
-        format_size(metadata.compressed_size)
-    );
+    println!("    Compressed size: {}", format_size(compressed_size));
     if metadata.uncompressed_size > 0 {
         println!(
             "    Compression ratio: {:.2}%",
-            (metadata.compressed_size as f64 / metadata.uncompressed_size as f64) * 100.0
+            (compressed_size as f64 / metadata.uncompressed_size as f64) * 100.0
         );
-        if metadata.compressed_size <= metadata.uncompressed_size {
+        if compressed_size <= metadata.uncompressed_size {
             println!(
                 "    Space saved: {:.2}%",
-                ((metadata.uncompressed_size - metadata.compressed_size) as f64
+                ((metadata.uncompressed_size - compressed_size) as f64
                     / metadata.uncompressed_size as f64)
                     * 100.0
             );
         } else {
             println!(
                 "    Space overhead: {:.2}%",
-                ((metadata.compressed_size - metadata.uncompressed_size) as f64
+                ((compressed_size - metadata.uncompressed_size) as f64
                     / metadata.uncompressed_size as f64)
                     * 100.0
             );

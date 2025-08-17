@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
 
+use blake3::hazmat::{ChainingValue, HasherExt};
+
 use crate::{
     ByteWriter, Prefilter, Result, SLZOptions, Write, error_invalid_data,
     header::SLZHeader,
@@ -7,6 +9,7 @@ use crate::{
         LZMAOptions, LZMAWriter,
         filter::{bcj::BCJWriter, delta::DeltaWriter},
     },
+    resolve_cv_stack,
     trailer::SLZTrailer,
 };
 
@@ -116,8 +119,9 @@ pub struct SLZStreamingWriter<W> {
     writer: Option<Writer>,
     options: SLZOptions,
     header_written: bool,
-    hasher: blake3::Hasher,
     current_block_uncompressed_size: u64,
+    current_block_hasher: blake3::Hasher,
+    block_chaining_values: Vec<[u8; 32]>,
     uncompressed_size: u64,
     compressed_size: u64,
 }
@@ -130,14 +134,14 @@ impl<W: Write> SLZStreamingWriter<W> {
             writer: None,
             options,
             header_written: false,
-            hasher: blake3::Hasher::new(),
             current_block_uncompressed_size: 0,
+            current_block_hasher: blake3::Hasher::new(),
+            block_chaining_values: Vec::new(),
             uncompressed_size: 0,
             compressed_size: 0,
         }
     }
 
-    /// Write the header.
     fn write_header(&mut self) -> Result<()> {
         if self.header_written {
             return Ok(());
@@ -153,10 +157,15 @@ impl<W: Write> SLZStreamingWriter<W> {
     fn start_new_block(&mut self, buffer: Vec<u8>) -> Result<()> {
         let writer = Writer::new(&self.options, buffer)?;
         self.writer = Some(writer);
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.set_input_offset(self.uncompressed_size);
+        self.current_block_hasher = hasher;
+
         Ok(())
     }
 
-    fn finish_current_block(&mut self, writer: Writer) -> Result<Vec<u8>> {
+    fn finish_current_block(&mut self, writer: Writer, is_final_block: bool) -> Result<Vec<u8>> {
         let mut compressed_data = writer.finish()?;
 
         if !compressed_data.is_empty() {
@@ -172,20 +181,54 @@ impl<W: Write> SLZStreamingWriter<W> {
             self.inner.write_u64(compressed_size as u64)?;
             self.inner.write_all(&compressed_data)?;
 
+            // For single-block files, we finalize as root. For multi-block files, as chaining value.
+            let hash_value = if is_final_block && self.block_chaining_values.is_empty() {
+                *self.current_block_hasher.finalize().as_bytes()
+            } else {
+                self.current_block_hasher.finalize_non_root()
+            };
+
+            self.block_chaining_values.push(hash_value);
+
+            let trailer = SLZTrailer::new(self.current_block_uncompressed_size, hash_value);
+            trailer.write_block_trailer(&mut self.inner)?;
+
             self.compressed_size += compressed_size as u64;
 
+            // Reset for next block.
+            self.current_block_uncompressed_size = 0;
             compressed_data.clear();
         }
 
         Ok(compressed_data)
     }
 
-    fn write_trailer(&mut self) -> Result<()> {
-        let computed_hash = self.hasher.finalize();
-        let computed_bytes = *computed_hash.as_bytes();
+    fn write_file_trailer(&mut self) -> Result<()> {
+        // Compute root hash by merging all block chaining values
+        let root_hash = if self.block_chaining_values.is_empty() {
+            // Empty file case - hash of empty data
+            *blake3::Hasher::new().finalize().as_bytes()
+        } else if self.block_chaining_values.len() == 1 {
+            // Single block file - the block already contains the root hash
+            self.block_chaining_values[0]
+        } else {
+            // Multi-block file - merge chaining values
+            self.merge_chaining_values()?
+        };
 
-        let trailer = SLZTrailer::new(self.uncompressed_size, computed_bytes);
-        trailer.write(&mut self.inner)
+        let trailer = SLZTrailer::new(self.uncompressed_size, root_hash);
+        trailer.write_file_trailer(&mut self.inner)
+    }
+
+    /// Use BLAKE3's hazmat module to properly merge chaining values.
+    fn merge_chaining_values(&self) -> Result<[u8; 32]> {
+        let cv_stack: Vec<ChainingValue> = self
+            .block_chaining_values
+            .iter()
+            .map(|&bytes| ChainingValue::from(bytes))
+            .collect();
+
+        resolve_cv_stack(cv_stack)
     }
 
     /// Consume the writer and return the inner writer.
@@ -200,10 +243,10 @@ impl<W: Write> SLZStreamingWriter<W> {
         }
 
         if let Some(counting_writer) = self.writer.take() {
-            self.finish_current_block(counting_writer)?;
+            self.finish_current_block(counting_writer, true)?;
         }
 
-        self.write_trailer()?;
+        self.write_file_trailer()?;
 
         Ok(self.into_inner())
     }
@@ -237,8 +280,7 @@ impl<W: Write> Write for SLZStreamingWriter<W> {
             if self.current_block_uncompressed_size >= block_limit {
                 // Current block is full, finish it and start a new one.
                 if let Some(writer) = self.writer.take() {
-                    let buffer = self.finish_current_block(writer)?;
-                    self.current_block_uncompressed_size = 0;
+                    let buffer = self.finish_current_block(writer, false)?; // Not the final block
                     self.start_new_block(buffer)?;
                 }
             }
@@ -256,7 +298,9 @@ impl<W: Write> Write for SLZStreamingWriter<W> {
             self.current_block_uncompressed_size += bytes_written as u64;
             self.uncompressed_size += bytes_written as u64;
 
-            self.hasher.update(&remaining[..bytes_written]);
+            // Update block hasher with uncompressed data
+            self.current_block_hasher
+                .update(&remaining[..bytes_written]);
 
             total_written += bytes_written;
             remaining = &remaining[bytes_written..];
@@ -287,7 +331,12 @@ mod tests {
     #[test]
     fn test_slz_writer_empty() {
         let expected_compressed: [u8; 88] = hex!(
-            "fedcba9801005d0000000000000000000000000000000000af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d"
+            "fedcba9801005d000000000000000000
+             0000000000000000af1349b9f5f9a1a6
+             a0404dea36dcc9499bcb25c9adc112b7
+             cc9a93cae41f3262cedfc1cc789afb17
+             6bf1fb71a6756a5b315bdbc2322f987f
+             f3aa7b0c7c2a6a7d"
         );
         let expected_blake_hash: [u8; 32] =
             hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
@@ -358,11 +407,22 @@ mod tests {
         assert_eq!(buffer.as_slice(), expected_compressed);
     }
 
-    // Specification: Appendix A.1 Minimal File
+    // Test with single byte - now includes block trailer
     #[test]
     fn test_slz_writer_zero_byte() {
-        let expected_compressed: [u8; 108] = hex!(
-            "fedcba9801011f5d0e0b00000000000000000041fef7ffffe0008000000000000000000001000000000000002d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213c213b18ea038cbd9669481d7382c07d10c82c200979933423a3340c248382018"
+        let expected_compressed: [u8; 180] = hex!(
+            "fedcba9801011f5d0e0b000000000000
+             00000041fef7ffffe000800001000000
+             000000002d3adedff11b61f14c886e35
+             afa036736dcd87a74d27b5c1510225d0
+             f592e213c213b18ea038cbd9669481d7
+             382c07d10c82c200979933423a3340c2
+             48382018000000000000000001000000
+             000000002d3adedff11b61f14c886e35
+             afa036736dcd87a74d27b5c1510225d0
+             f592e213c213b18ea038cbd9669481d7
+             382c07d10c82c200979933423a3340c2
+             48382018"
         );
         let expected_blake_hash: [u8; 32] =
             hex!("2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213");
@@ -385,11 +445,22 @@ mod tests {
         writer.write_all(&[0x00]).unwrap();
         let _ = writer.finish().unwrap();
 
-        // Total file size should be: 9 (header) + 9 byte LZMA stream + 8 (end marker) + 72 (trailer) = 108 bytes
-        assert_eq!(buffer.len(), 108, "Total file size should be 108 bytes");
+        // Total file size should be:
+        //   9 (header) +
+        //  19 (block with size) +
+        //  72 (block trailer) +
+        //   8 (end marker) +
+        //  72 (final trailer)
+        // = 180 bytes
+        assert_eq!(buffer.len(), 180, "Total file size should be 180 bytes");
 
         let (header, rest) = buffer.split_at(9);
-        let (blocks, trailer) = rest.split_at(27);
+
+        // Block structure: 8 bytes size + 11 bytes compressed data + 72 bytes block trailer = 91 bytes
+        let (block_section, final_section) = rest.split_at(91);
+
+        // Then: 8 bytes end marker + 72 bytes final trailer = 80 bytes
+        let (end_marker, final_trailer) = final_section.split_at(8);
 
         // Magic bytes: 0xFE 0xDC 0xBA 0x98 (4 bytes)
         assert_eq!(header[0], 0xFE, "Magic byte 0");
@@ -412,30 +483,78 @@ mod tests {
         // LZMA dictionary size: 30 - 16 = 14 (1 byte)
         assert_eq!(header[8], 0x0E, "LZMA dictionary size should be 14");
 
-        // LZMA payload
-        assert_eq!(blocks[0], 0x0B);
+        // Block: 8-byte size field + compressed data + 72-byte block trailer
+        let block_size = u64::from_le_bytes([
+            block_section[0],
+            block_section[1],
+            block_section[2],
+            block_section[3],
+            block_section[4],
+            block_section[5],
+            block_section[6],
+            block_section[7],
+        ]);
+        assert_eq!(block_size, 11, "Block compressed size should be 11 bytes");
 
-        // End-of-blocks marker: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+        // LZMA payload
         assert_eq!(
-            &blocks[1..9],
+            &block_section[8..19],
+            &[
+                0x00, 0x00, 0x41, 0xFE, 0xF7, 0xFF, 0xFF, 0xE0, 0x00, 0x80, 0x00
+            ]
+        );
+
+        // Block trailer starts at offset 8 + 11 = 19
+        let block_trailer = &block_section[19..];
+        assert_eq!(block_trailer.len(), 72, "Block trailer should be 72 bytes");
+
+        // Block trailer structure: 8 bytes uncompressed size + 32 bytes chaining value + 32 bytes RS parity
+        let block_uncompressed_size = u64::from_le_bytes([
+            block_trailer[0],
+            block_trailer[1],
+            block_trailer[2],
+            block_trailer[3],
+            block_trailer[4],
+            block_trailer[5],
+            block_trailer[6],
+            block_trailer[7],
+        ]);
+        assert_eq!(
+            block_uncompressed_size, 1,
+            "Block uncompressed size should be 1 byte"
+        );
+
+        // Blake3 hash of empty data (32 bytes)
+        assert_eq!(&block_trailer[8..40], &expected_blake_hash, "Blake3 hash");
+
+        // Reed-Solomon parity (32 bytes)
+        assert_eq!(&block_trailer[40..72], &expected_rs_parity, "RS parity");
+
+        // End-of-blocks marker
+        assert_eq!(
+            end_marker,
             &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
             "End-of-blocks marker"
         );
 
-        assert_eq!(trailer.len(), 72, "Trailer should be exactly 72 bytes");
-
-        // Uncompressed size: 1 (8 bytes, little-endian)
         assert_eq!(
-            &trailer[0..8],
+            final_trailer.len(),
+            72,
+            "Final trailer should be exactly 72 bytes"
+        );
+
+        // Total uncompressed size: 1 (8 bytes, little-endian)
+        assert_eq!(
+            &final_trailer[0..8],
             &[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            "Uncompressed size should be 1"
+            "Total uncompressed size should be 1"
         );
 
         // Blake3 hash of empty data (32 bytes)
-        assert_eq!(&trailer[8..40], &expected_blake_hash, "Blake3 hash");
+        assert_eq!(&final_trailer[8..40], &expected_blake_hash, "Blake3 hash");
 
         // Reed-Solomon parity (32 bytes)
-        assert_eq!(&trailer[40..72], &expected_rs_parity, "RS parity");
+        assert_eq!(&final_trailer[40..72], &expected_rs_parity, "RS parity");
 
         assert_eq!(buffer.as_slice(), expected_compressed);
     }

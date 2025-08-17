@@ -2,20 +2,19 @@
 
 Implementation of an experimental compression file format using LZMA optimized for streaming and parallel processing.
 
-**Note: The SLZ format is currently in draft mode (v0.3) and not yet frozen. The specification may change in future
+**Note: The SLZ format is currently in draft mode (v0.4) and not yet frozen. The specification may change in future
 versions.**
 
 ## Overview
 
-SLZ (Streaming-LZMA) is designed for scenarios where traditional compression formats fall short. The format provides:
+SLZ (Streaming-LZMA) is designed for scenarios where other compression formats fall short. The format provides:
 
-- **Streaming operation**: Read data sequentially without seeks, random access or buffering (Writing needs buffering)
-- **Parallel processing**: Independent blocks enable concurrent decompression for improved performance
-- **Data integrity**: Blake3 hashing which is protected by error correction (Reed-Solomon)
-
-SLZ main selling point is its easily parallelization, especially when decompressing, and it's strong data protection by
-an innovative usage of a strong cryptographic hash function (blake3) and the elimination of false positives in the form
-of error correcting the content hash with the help of a Reed-Solomon error correction.
+- **Streaming operation**: Read data sequentially without seeks, random access or buffering (writing needs buffering)
+- **Parallel processing**: Independent blocks enable concurrent compression and decompression for improved performance
+- **Efficient append operations**: O(n) complexity where n is the number of blocks, not the data size, thanks to BLAKE3
+  chaining values
+- **Per-block validation**: Each block has its own integrity verification with Reed-Solomon error correction
+- **High robustness**: Five-layer integrity protection from LZMA stream validation to cryptographic hashing
 
 ## Installation and Usage
 
@@ -60,12 +59,16 @@ slz --best input.txt
 # Set block count for parallelization
 slz -6 --block-count=64 input.txt
 
-# List metadata 
+# List metadata and block information
 slz --list input.txt.slz
 
 # Specify output file
 slz -o output.slz input.txt
 ```
+
+## Technical Details
+
+Please have a look at the [specification](SPECIFICATION.md) for in depth details.
 
 ## Acknowledgement
 

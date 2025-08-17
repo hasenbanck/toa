@@ -58,8 +58,8 @@ if [ ! -f "$BIN" ]; then
     exit 1
 fi
 
-# Step 4: Run compression and decompression to create a PGO profile.
-"$BIN" --preset 7 --keep "$KERNEL_TAR"
+# Step 4: Run compression and decompression to create a PGO profile (block size = 64 MiB).
+"$BIN" --preset 7 --block-size=67108864 --keep "$KERNEL_TAR"
 "$BIN" --decompress --keep "$KERNEL_TAR.slz"
 
 # Step 5: Optimize with PGO
