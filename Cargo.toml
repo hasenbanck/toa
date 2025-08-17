@@ -26,13 +26,3 @@ path = "src/main.rs"
 [dependencies]
 libslz = { version = "0.1", features = ["std"], path = "libslz" }
 clap = { workspace = true }
-
-# Activate this block section if you want to run benchmark.
-# criterion = { version = "0.7", features = ["html_reports"] }
-#
-#[dev-dependencies]
-#criterion = { workspace = true }
-#
-#[[bench]]
-#name = "comparison"
-#harness = false
