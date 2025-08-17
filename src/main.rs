@@ -15,6 +15,7 @@ struct Cli {
     extract: bool,
     list: bool,
     keep: bool,
+    verbose: bool,
     preset: u32,
     block_size: Option<u64>,
     x86: bool,
@@ -65,6 +66,13 @@ impl Cli {
                     .help("Keep input file after compression/decompression")
                     .short('k')
                     .long("keep")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("verbose")
+                    .help("Show detailed output during operations")
+                    .short('v')
+                    .long("verbose")
                     .action(clap::ArgAction::SetTrue),
             )
             .arg(
@@ -287,6 +295,7 @@ impl Cli {
             extract: matches.get_flag("extract"),
             list: matches.get_flag("list"),
             keep: matches.get_flag("keep"),
+            verbose: matches.get_flag("verbose"),
             preset,
             block_size: matches.get_one::<u64>("block-size").copied(),
             x86: matches.get_flag("x86"),
@@ -369,7 +378,7 @@ fn main() -> Result<()> {
     if cli.list {
         // List mode - show metadata.
         if let Err(error) = list_file_info(&cli) {
-            eprintln!("Error: {error}");
+            eprintln!("Error: Can't list file content: {error}");
             process::exit(1);
         }
     } else if cli.extract {
@@ -386,29 +395,31 @@ fn main() -> Result<()> {
             match decompress_file(&cli, &output_filename) {
                 Ok(result) => result,
                 Err(error) => {
-                    eprintln!("Error: {error}");
+                    eprintln!("Error: Can't decompress file: {error}");
                     process::exit(1);
                 }
             };
 
-        let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
-            (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
-        } else {
-            0.0
-        };
-
-        println!("Compressed:   {compressed_size} bytes");
-        println!("Uncompressed: {uncompressed_size} bytes");
-        println!(
-            "Compression ratio: {:.2}% bytes",
-            if uncompressed_size > 0 {
-                (compressed_size as f64 / uncompressed_size as f64) * 100.0
+        if cli.verbose {
+            let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+                (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
             } else {
                 0.0
-            },
-        );
-        println!("Decompression time: {:.3}s", elapsed.as_secs_f64(),);
-        println!("Decompression speed: {speed_mibs:.1} MiB/s");
+            };
+
+            println!("Compressed:   {compressed_size} bytes");
+            println!("Uncompressed: {uncompressed_size} bytes");
+            println!(
+                "Compression ratio: {:.2}% bytes",
+                if uncompressed_size > 0 {
+                    (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                } else {
+                    0.0
+                },
+            );
+            println!("Decompression time: {:.3}s", elapsed.as_secs_f64(),);
+            println!("Decompression speed: {speed_mibs:.1} MiB/s");
+        }
 
         if !cli.keep
             && let Err(error) = fs::remove_file(&cli.input)
@@ -426,29 +437,31 @@ fn main() -> Result<()> {
             match compress_file(&cli, &output_filename) {
                 Ok(result) => result,
                 Err(error) => {
-                    eprintln!("Error: {error}");
+                    eprintln!("Error: Can't compress file: {error}");
                     process::exit(1);
                 }
             };
 
-        let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
-            (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
-        } else {
-            0.0
-        };
-
-        println!("Compressed:   {compressed_size} bytes");
-        println!("Uncompressed: {uncompressed_size} bytes");
-        println!(
-            "Compression ratio: {:.2}% bytes",
-            if uncompressed_size > 0 {
-                (compressed_size as f64 / uncompressed_size as f64) * 100.0
+        if cli.verbose {
+            let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+                (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
             } else {
                 0.0
-            },
-        );
-        println!("Compression time: {:.3}s", elapsed.as_secs_f64(),);
-        println!("Compression speed: {speed_mibs:.1} MiB/s");
+            };
+
+            println!("Compressed:   {compressed_size} bytes");
+            println!("Uncompressed: {uncompressed_size} bytes");
+            println!(
+                "Compression ratio: {:.2}% bytes",
+                if uncompressed_size > 0 {
+                    (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                } else {
+                    0.0
+                },
+            );
+            println!("Compression time: {:.3}s", elapsed.as_secs_f64(),);
+            println!("Compression speed: {speed_mibs:.1} MiB/s");
+        }
 
         if !cli.keep
             && let Err(error) = fs::remove_file(&cli.input)

@@ -23,7 +23,7 @@ pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
     println!("  Structure:");
     println!("    Block count: {}", metadata.block_count);
     if metadata.block_count > 0 {
-        let avg_block_size = metadata.compressed_size / metadata.block_count as u64;
+        let avg_block_size = metadata.compressed_size / metadata.block_count;
         println!(
             "    Average block size: {} bytes ({:.1} KiB)",
             avg_block_size,
