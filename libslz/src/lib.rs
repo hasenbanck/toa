@@ -90,11 +90,6 @@ const SLZ_VERSION: u8 = 0x01;
 pub enum Prefilter {
     /// No prefilter
     None,
-    /// Delta filter
-    Delta {
-        /// Filter distance (must be 1..=256)
-        distance: u16,
-    },
     /// BCJ filter for x86 (32-bit and 64-bit) executables
     BcjX86,
     /// BCJ filter for ARM executables
@@ -117,15 +112,33 @@ impl From<Prefilter> for u8 {
     fn from(value: Prefilter) -> Self {
         match value {
             Prefilter::None => 0x00,
-            Prefilter::Delta { .. } => 0x01,
-            Prefilter::BcjX86 => 0x02,
-            Prefilter::BcjArm => 0x03,
-            Prefilter::BcjArmThumb => 0x04,
-            Prefilter::BcjArm64 => 0x05,
-            Prefilter::BcjSparc => 0x06,
-            Prefilter::BcjPowerPc => 0x07,
-            Prefilter::BcjIa64 => 0x08,
-            Prefilter::BcjRiscV => 0x09,
+            Prefilter::BcjX86 => 0x01,
+            Prefilter::BcjArm => 0x02,
+            Prefilter::BcjArmThumb => 0x03,
+            Prefilter::BcjArm64 => 0x04,
+            Prefilter::BcjSparc => 0x05,
+            Prefilter::BcjPowerPc => 0x06,
+            Prefilter::BcjIa64 => 0x07,
+            Prefilter::BcjRiscV => 0x08,
+        }
+    }
+}
+
+impl TryFrom<u8> for Prefilter {
+    type Error = ();
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Prefilter::None),
+            0x01 => Ok(Prefilter::BcjX86),
+            0x02 => Ok(Prefilter::BcjArm),
+            0x03 => Ok(Prefilter::BcjArmThumb),
+            0x04 => Ok(Prefilter::BcjArm64),
+            0x05 => Ok(Prefilter::BcjSparc),
+            0x06 => Ok(Prefilter::BcjPowerPc),
+            0x07 => Ok(Prefilter::BcjIa64),
+            0x08 => Ok(Prefilter::BcjRiscV),
+            _ => Err(()),
         }
     }
 }
@@ -137,8 +150,6 @@ trait ByteReader {
 }
 
 trait ByteWriter {
-    fn write_u8(&mut self, value: u8) -> Result<()>;
-
     fn write_u64(&mut self, value: u64) -> Result<()>;
 }
 
@@ -159,11 +170,6 @@ impl<T: Read> ByteReader for T {
 }
 
 impl<T: Write> ByteWriter for T {
-    #[inline(always)]
-    fn write_u8(&mut self, value: u8) -> Result<()> {
-        self.write_all(&[value])
-    }
-
     #[inline(always)]
     fn write_u64(&mut self, value: u64) -> Result<()> {
         self.write_all(&value.to_le_bytes())

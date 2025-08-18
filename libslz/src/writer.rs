@@ -152,15 +152,7 @@ impl SLZOptions {
     }
 
     /// Set the prefilter to use.
-    ///
-    /// Delta filter distance will be clamped in range of 1 and 256.
     pub fn with_prefilter(mut self, prefilter: Prefilter) -> Self {
-        let mut prefilter = prefilter;
-
-        if let Prefilter::Delta { distance } = &mut prefilter {
-            *distance = (*distance).clamp(1, 256);
-        }
-
         self.prefilter = prefilter;
         self
     }

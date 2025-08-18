@@ -2,10 +2,8 @@ use blake3::hazmat::{ChainingValue, HasherExt};
 
 use super::Reader;
 use crate::{
-    ByteReader, Read, Result, SLZHeader, error_invalid_data,
-    lzma::optimized_reader::OptimizedReader,
-    resolve_cv_stack,
-    trailer::{SLZBlockTrailer, SLZFileTrailer},
+    Read, Result, SLZHeader, error_invalid_data, header::SLZBlockHeader,
+    lzma::optimized_reader::OptimizedReader, resolve_cv_stack, trailer::SLZFileTrailer,
 };
 
 /// Block validation information stored for each block.
@@ -13,12 +11,6 @@ use crate::{
 struct BlockInfo {
     /// Hash value from the block trailer (chaining value or root hash)
     stored_hash: [u8; 32],
-    /// Whether this is a root hash (true) or chaining value (false)
-    #[allow(dead_code)]
-    is_root_hash: bool,
-    /// Uncompressed size of this block
-    #[allow(dead_code)]
-    uncompressed_size: u64,
 }
 
 /// A single-threaded streaming SLZ decompressor.
@@ -30,15 +22,17 @@ pub struct SLZStreamingReader<R> {
     trailer_read: bool,
     current_block_hasher: blake3::Hasher,
     current_block_uncompressed_size: u64,
+    current_block_physical_size: u64,
+    current_block_expected_hash: Option<[u8; 32]>,
     blocks: Vec<BlockInfo>,
     total_uncompressed_size: u64,
-    validate_trailer: bool,
+    validate_rs: bool,
     partial_block_msb_set: bool,
 }
 
 impl<R: OptimizedReader> SLZStreamingReader<R> {
     /// Create a new SLZ reader.
-    pub fn new(inner: R, validate_trailer: bool) -> Self {
+    pub fn new(inner: R, validate_rs: bool) -> Self {
         Self {
             inner: Some(inner),
             header: None,
@@ -47,9 +41,11 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
             trailer_read: false,
             current_block_hasher: blake3::Hasher::new(),
             current_block_uncompressed_size: 0,
+            current_block_physical_size: 0,
+            current_block_expected_hash: None,
             blocks: Vec::new(),
             total_uncompressed_size: 0,
-            validate_trailer,
+            validate_rs,
             partial_block_msb_set: false,
         }
     }
@@ -64,108 +60,121 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
             .take()
             .ok_or_else(|| error_invalid_data("reader consumed"))?;
 
-        let size_with_flag = inner.read_u64()?;
+        // Read 64 bytes as potential block header or final trailer.
+        let mut header_data = [0u8; 64];
+        inner.read_exact(&mut header_data)?;
 
-        if size_with_flag == 0 {
-            // End-of-blocks marker.
-            self.blocks_finished = true;
-            self.inner = Some(inner);
-            return Ok(false);
+        let size_with_flags = u64::from_le_bytes([
+            header_data[0],
+            header_data[1],
+            header_data[2],
+            header_data[3],
+            header_data[4],
+            header_data[5],
+            header_data[6],
+            header_data[7],
+        ]);
+
+        // Check MSB (bit 63) to determine if this is final trailer or block header.
+        match (size_with_flags & (1u64 << 63)) != 0 {
+            true => {
+                // MSB=1: This is the final trailer.
+                self.blocks_finished = true;
+
+                let trailer = SLZFileTrailer::parse(&header_data, self.validate_rs)?;
+                let computed_root_hash = self.compute_root_hash()?;
+
+                if computed_root_hash != trailer.blake3_hash {
+                    return Err(error_invalid_data("blake3 hash mismatch"));
+                }
+
+                self.inner = Some(inner);
+
+                Ok(false)
+            }
+            false => {
+                // MSB=0: This is a block header.
+                if self.partial_block_msb_set {
+                    return Err(error_invalid_data(
+                        "partial blocks only allowed as final block",
+                    ));
+                }
+
+                let block_header = SLZBlockHeader::parse(&header_data, self.validate_rs)?;
+                let physical_size = block_header.physical_size();
+                let is_partial_block = block_header.is_partial_block();
+
+                self.partial_block_msb_set = is_partial_block;
+
+                let header = self
+                    .header
+                    .ok_or_else(|| error_invalid_data("header not read"))?;
+
+                let mut hasher = blake3::Hasher::new();
+                hasher.set_input_offset(self.total_uncompressed_size);
+                self.current_block_hasher = hasher;
+
+                self.current_block_uncompressed_size = 0;
+                self.current_block_physical_size = physical_size;
+
+                // Store the block header hash for later verification.
+                self.current_block_expected_hash = Some(block_header.blake3_hash);
+
+                // Create the reader chain.
+                let reader = Reader::new(
+                    inner,
+                    header.prefilter,
+                    header.lc,
+                    header.lp,
+                    header.pb,
+                    header.dict_size(),
+                )?;
+
+                self.current_reader = Some(reader);
+
+                Ok(true)
+            }
         }
-
-        if self.partial_block_msb_set {
-            return Err(error_invalid_data(
-                "partial blocks only allowed as final block",
-            ));
-        }
-
-        // Extract the actual compressed size and check MSB flag.
-        let is_partial_block = (size_with_flag as i64) < 0;
-        self.partial_block_msb_set = is_partial_block;
-
-        let _compressed_size = if is_partial_block {
-            // Remove MSB flag by taking absolute value.
-            (-(size_with_flag as i64)) as u64
-        } else {
-            size_with_flag
-        };
-
-        let header = self
-            .header
-            .ok_or_else(|| error_invalid_data("header not read"))?;
-
-        let mut hasher = blake3::Hasher::new();
-        hasher.set_input_offset(self.total_uncompressed_size);
-        self.current_block_hasher = hasher;
-        self.current_block_uncompressed_size = 0;
-
-        // Create the reader chain.
-        let reader = Reader::new(
-            inner,
-            header.prefilter,
-            header.lc,
-            header.lp,
-            header.pb,
-            header.dict_size(),
-        )?;
-
-        self.current_reader = Some(reader);
-
-        Ok(true)
     }
 
     /// Finish the current block and recover the inner reader.
     fn finish_current_block(&mut self) -> Result<()> {
         if let Some(reader) = self.current_reader.take() {
-            let mut recovered_inner = reader.into_inner();
+            let recovered_inner = reader.into_inner();
 
-            let block_trailer = SLZBlockTrailer::parse(&mut recovered_inner)?;
+            // Get the expected hash from when we parsed the block header
+            let expected_hash = self
+                .current_block_expected_hash
+                .ok_or_else(|| error_invalid_data("no expected hash for current block"))?;
 
-            // For the first block, we need to calculate both possible hashes (root vs. chaining value).
-            let (stored_hash, is_root_hash) = if self.blocks.is_empty() {
+            // For the first block, we need to determine if it's a root hash or chaining value.
+            let stored_hash = if self.blocks.is_empty() {
                 let hasher_clone = self.current_block_hasher.clone();
-                let computed_chaining_value = hasher_clone.finalize_non_root();
                 let computed_root_hash = *self.current_block_hasher.finalize().as_bytes();
+                let computed_chaining_value = hasher_clone.finalize_non_root();
 
-                if block_trailer.blake3_hash == computed_root_hash {
-                    (block_trailer.blake3_hash, true)
-                } else if block_trailer.blake3_hash == computed_chaining_value {
-                    (block_trailer.blake3_hash, false)
-                } else if self.validate_trailer {
-                    if block_trailer
-                        .verify(self.validate_trailer, &computed_root_hash)
-                        .is_ok()
-                    {
-                        (block_trailer.blake3_hash, true)
-                    } else if block_trailer
-                        .verify(self.validate_trailer, &computed_chaining_value)
-                        .is_ok()
-                    {
-                        (block_trailer.blake3_hash, false)
-                    } else {
-                        return Err(error_invalid_data("block hash validation failed"));
-                    }
+                if expected_hash == computed_root_hash || expected_hash == computed_chaining_value {
+                    expected_hash
                 } else {
-                    return Err(error_invalid_data("block hash mismatch"));
+                    return Err(error_invalid_data(
+                        "block hash mismatch with expected hash from header",
+                    ));
                 }
             } else {
                 // Subsequent blocks are always chaining values in multi-block files.
                 let computed_chaining_value = self.current_block_hasher.finalize_non_root();
-                if self.validate_trailer {
-                    block_trailer.verify(self.validate_trailer, &computed_chaining_value)?;
-                } else if block_trailer.blake3_hash != computed_chaining_value {
-                    return Err(error_invalid_data("block chaining value mismatch"));
+                if expected_hash != computed_chaining_value {
+                    return Err(error_invalid_data(
+                        "block chaining value mismatch with expected hash from header",
+                    ));
                 }
-                (block_trailer.blake3_hash, false)
+                expected_hash
             };
 
-            let block_info = BlockInfo {
-                stored_hash,
-                is_root_hash,
-                uncompressed_size: self.current_block_uncompressed_size,
-            };
-
+            let block_info = BlockInfo { stored_hash };
             self.blocks.push(block_info);
+
+            self.current_block_expected_hash = None;
             self.inner = Some(recovered_inner);
         }
         Ok(())
@@ -195,19 +204,6 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
         resolve_cv_stack(cv_stack)
     }
 
-    fn parse_and_verify_trailer(&mut self) -> Result<()> {
-        let inner = self
-            .inner
-            .as_mut()
-            .ok_or_else(|| error_invalid_data("reader consumed"))?;
-
-        let trailer = SLZFileTrailer::parse(inner)?;
-
-        let computed_root_hash = self.compute_root_hash()?;
-
-        trailer.verify(self.validate_trailer, &computed_root_hash)
-    }
-
     /// Consume the reader and return the inner reader.
     pub fn into_inner(mut self) -> R {
         if self.current_reader.is_some() {
@@ -235,7 +231,15 @@ impl<R: OptimizedReader> Read for SLZStreamingReader<R> {
                 .as_mut()
                 .ok_or_else(|| error_invalid_data("reader consumed"))?;
 
-            self.header = Some(SLZHeader::parse(inner)?);
+            let mut buffer = [0u8; 34];
+
+            if inner.read_exact(&mut buffer).is_err() {
+                return Err(error_invalid_data("can't read file header"));
+            }
+
+            let header = SLZHeader::parse(&buffer, self.validate_rs)?;
+
+            self.header = Some(header);
         }
 
         let mut total_read = 0;
@@ -244,7 +248,6 @@ impl<R: OptimizedReader> Read for SLZStreamingReader<R> {
         while !remaining.is_empty() {
             // If no current block, try to start the next one.
             if self.current_reader.is_none() && !self.start_next_block()? {
-                self.parse_and_verify_trailer()?;
                 self.trailer_read = true;
                 break;
             }

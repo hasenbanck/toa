@@ -31,7 +31,6 @@ struct Cli {
     powerpc: bool,
     ia64: bool,
     riscv: bool,
-    delta: Option<u16>,
     lc: Option<u8>,
     lp: Option<u8>,
     pb: Option<u8>,
@@ -149,13 +148,6 @@ impl Cli {
                     .help("Use RISC-V BCJ filter")
                     .long("riscv")
                     .action(clap::ArgAction::SetTrue),
-            )
-            .arg(
-                Arg::new("delta")
-                    .help("Use Delta filter with specified distance (1-256)")
-                    .long("delta")
-                    .value_name("distance")
-                    .value_parser(value_parser!(u16)),
             )
             .arg(
                 Arg::new("lc")
@@ -320,7 +312,6 @@ impl Cli {
             powerpc: matches.get_flag("powerpc"),
             ia64: matches.get_flag("ia64"),
             riscv: matches.get_flag("riscv"),
-            delta: matches.get_one::<u16>("delta").copied(),
             lc: matches.get_one::<u8>("lc").copied(),
             lp: matches.get_one::<u8>("lp").copied(),
             pb: matches.get_one::<u8>("pb").copied(),
@@ -355,9 +346,6 @@ impl Cli {
         if self.riscv {
             filters.push("riscv");
         }
-        if self.delta.is_some() {
-            filters.push("delta");
-        }
 
         if filters.len() > 1 {
             eprintln!(
@@ -376,9 +364,6 @@ impl Cli {
             Some(&"powerpc") => Prefilter::BcjPowerPc,
             Some(&"ia64") => Prefilter::BcjIa64,
             Some(&"riscv") => Prefilter::BcjRiscV,
-            Some(&"delta") => Prefilter::Delta {
-                distance: self.delta.unwrap_or(1).clamp(1, 256),
-            },
             None => Prefilter::None,
             _ => unreachable!(),
         })

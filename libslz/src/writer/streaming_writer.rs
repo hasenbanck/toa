@@ -3,21 +3,17 @@ use alloc::vec::Vec;
 use blake3::hazmat::{ChainingValue, HasherExt};
 
 use crate::{
-    ByteWriter, Prefilter, Result, SLZOptions, Write, error_invalid_data,
-    header::SLZHeader,
-    lzma::{
-        LZMAOptions, LZMAWriter,
-        filter::{bcj::BCJWriter, delta::DeltaWriter},
-    },
+    Prefilter, Result, SLZOptions, Write, error_invalid_data,
+    header::{SLZBlockHeader, SLZHeader},
+    lzma::{LZMAOptions, LZMAWriter, filter::bcj::BCJWriter},
     resolve_cv_stack,
-    trailer::{SLZBlockTrailer, SLZFileTrailer},
+    trailer::SLZFileTrailer,
 };
 
 /// All possible writer combination.
 #[allow(clippy::large_enum_variant)]
 enum Writer {
     Lzma(LZMAWriter<Vec<u8>>),
-    Delta(DeltaWriter<LZMAWriter<Vec<u8>>>),
     BcjX86(BCJWriter<LZMAWriter<Vec<u8>>>),
     BcjArm(BCJWriter<LZMAWriter<Vec<u8>>>),
     BcjArmThumb(BCJWriter<LZMAWriter<Vec<u8>>>),
@@ -32,7 +28,6 @@ impl Write for Writer {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         match self {
             Writer::Lzma(writer) => writer.write(buf),
-            Writer::Delta(writer) => writer.write(buf),
             Writer::BcjX86(writer) => writer.write(buf),
             Writer::BcjArm(writer) => writer.write(buf),
             Writer::BcjArmThumb(writer) => writer.write(buf),
@@ -47,7 +42,6 @@ impl Write for Writer {
     fn flush(&mut self) -> Result<()> {
         match self {
             Writer::Lzma(writer) => writer.flush(),
-            Writer::Delta(writer) => writer.flush(),
             Writer::BcjX86(writer) => writer.flush(),
             Writer::BcjArm(writer) => writer.flush(),
             Writer::BcjArmThumb(writer) => writer.flush(),
@@ -82,7 +76,6 @@ impl Writer {
         #[rustfmt::skip]
         let chain = match options.prefilter {
             Prefilter::None => Writer::Lzma(lzma_writer),
-            Prefilter::Delta { distance } => Writer::Delta(DeltaWriter::new(lzma_writer, distance as usize)),
             Prefilter::BcjX86 => Writer::BcjX86(BCJWriter::new_x86(lzma_writer, 0)),
             Prefilter::BcjArm => Writer::BcjArm(BCJWriter::new_arm(lzma_writer, 0)),
             Prefilter::BcjArmThumb => Writer::BcjArmThumb(BCJWriter::new_arm_thumb(lzma_writer, 0)),
@@ -100,7 +93,6 @@ impl Writer {
     fn finish(self) -> Result<Vec<u8>> {
         match self {
             Writer::Lzma(writer) => writer.finish(),
-            Writer::Delta(writer) => writer.into_inner().finish(),
             Writer::BcjX86(writer) => writer.into_inner().finish(),
             Writer::BcjArm(writer) => writer.into_inner().finish(),
             Writer::BcjArmThumb(writer) => writer.into_inner().finish(),
@@ -180,21 +172,11 @@ impl<W: Write> SLZStreamingWriter<W> {
                 return Err(error_invalid_data("compressed block too large"));
             }
 
-            // Set MSB flag for partial blocks (only allowed for final block)
-            let size_with_flag = if is_partial_block {
-                if !is_final_block {
-                    return Err(error_invalid_data(
-                        "partial blocks only allowed as final block",
-                    ));
-                }
-                // Set MSB by making the value negative in i64, then cast to u64.
-                (-(compressed_size as i64)) as u64
-            } else {
-                compressed_size as u64
-            };
-
-            self.inner.write_u64(size_with_flag)?;
-            self.inner.write_all(&compressed_data)?;
+            if is_partial_block && !is_final_block {
+                return Err(error_invalid_data(
+                    "partial blocks only allowed as final block",
+                ));
+            }
 
             // For single-block files, we finalize as root. For multi-block files, as chaining value.
             let hash_value = if is_final_block && self.block_chaining_values.is_empty() {
@@ -205,9 +187,10 @@ impl<W: Write> SLZStreamingWriter<W> {
 
             self.block_chaining_values.push(hash_value);
 
-            let trailer = SLZBlockTrailer::new(hash_value);
-            trailer.write(&mut self.inner)?;
+            let header = SLZBlockHeader::new(compressed_size as u64, is_partial_block, hash_value);
+            header.write(&mut self.inner)?;
 
+            self.inner.write_all(&compressed_data)?;
             self.compressed_size += compressed_size as u64;
 
             // Reset for next block.
@@ -348,18 +331,19 @@ mod tests {
     // Specification: Appendix A.1 Minimal File
     #[test]
     fn test_slz_writer_empty() {
-        let expected_compressed: [u8; 89] = hex!(
-            "fedcba9801003e5d1000000000000000
-             000000000000000000af1349b9f5f9a1
-             a6a0404dea36dcc9499bcb25c9adc112
-             b7cc9a93cae41f3262cedfc1cc789afb
-             176bf1fb71a6756a5b315bdbc2322f98
-             7ff3aa7b0c7c2a6a7d"
+        let expected_compressed: [u8; 98] = hex!(
+            "fedcba980100003e5d10700649933ab752097563
+             d703b263a0e17a5e4824f77d2ff1000000000000
+             0080af1349b9f5f9a1a6a0404dea36dcc9499bcb
+             25c9adc112b7cc9a93cae41f3262b6b17928a5ac
+             89997f71c2a558ba97988ac959e411b42a81"
         );
-        let expected_blake_hash: [u8; 32] =
+        let expected_header_rs_parity: [u8; 24] =
+            hex!("700649933ab752097563d703b263a0e17a5e4824f77d2ff1");
+        let expected_trailer_blake_hash: [u8; 32] =
             hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
-        let expected_rs_parity: [u8; 32] =
-            hex!("cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d");
+        let expected_trailer_rs_parity: [u8; 24] =
+            hex!("b6b17928a5ac89997f71c2a558ba97988ac959e411b42a81");
 
         let mut buffer = Vec::new();
 
@@ -376,83 +360,83 @@ mod tests {
         let writer = SLZStreamingWriter::new(Cursor::new(&mut buffer), options);
         let _ = writer.finish().unwrap();
 
-        // Total file size should be: 9 (header) + 8 (end marker) + 72 (trailer) = 89 bytes
-        assert_eq!(buffer.len(), 89, "Total file size should be 89 bytes");
+        assert_eq!(buffer.len(), 98, "Total file size should be 98 bytes");
 
-        let (header, rest) = buffer.split_at(9);
-        let (blocks, trailer) = rest.split_at(8);
+        let (header, trailer) = buffer.split_at(34);
+        let (header, header_parity) = header.split_at(10);
 
-        // Magic bytes: 0xFE 0xDC 0xBA 0x98 (4 bytes)
         assert_eq!(header[0], 0xFE, "Magic byte 0");
         assert_eq!(header[1], 0xDC, "Magic byte 1");
         assert_eq!(header[2], 0xBA, "Magic byte 2");
         assert_eq!(header[3], 0x98, "Magic byte 3");
 
-        // Version: 0x01 (1 byte)
         assert_eq!(header[4], 0x01, "Format version should be 1");
+        assert_eq!(header[5], 0x00, "Capabilities should be 0x00");
+        assert_eq!(header[6], 0x00, "Prefilter: None");
+        assert_eq!(header[7], 62, "Block size exponent should be 62");
+        assert_eq!(header[8], 0x5D, "LZMA properties byte 1");
+        assert_eq!(header[9], 0x10, "LZMA properties byte 2 (dict size log2)");
 
-        // Configuration: No prefilter = 0x00 (1 byte)
-        assert_eq!(header[5], 0x00, "Configuration: No prefilter");
+        assert_eq!(header_parity, expected_header_rs_parity);
 
-        // Block size exponent: 62 (1 byte) - Default from header creation
-        assert_eq!(header[6], 62, "Block size exponent should be 62");
+        assert_eq!(trailer.len(), 64, "Trailer should be exactly 64 bytes");
 
-        // LZMA properties: 93 ( 2 (pb) * 5 + 0 (lp)) * 9 + 3 (lc)
-        assert_eq!(header[7], 0x5D, "LZMA configuration");
-
-        // LZMA dictionary size: 16 (1 byte)
-        assert_eq!(header[8], 16, "LZMA dictionary size should be 16");
-
-        // End-of-blocks marker: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+        let size_bytes = &trailer[0..8];
+        let size_value = u64::from_le_bytes([
+            size_bytes[0],
+            size_bytes[1],
+            size_bytes[2],
+            size_bytes[3],
+            size_bytes[4],
+            size_bytes[5],
+            size_bytes[6],
+            size_bytes[7],
+        ]);
         assert_eq!(
-            blocks,
-            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            "End-of-blocks marker"
+            size_value, 0x8000000000000000u64,
+            "Size should have MSB=1 flag set"
+        );
+        assert_eq!(
+            size_value & !(1u64 << 63),
+            0,
+            "Actual uncompressed size should be 0"
         );
 
-        assert_eq!(trailer.len(), 72, "Trailer should be exactly 72 bytes");
-
-        // Uncompressed size: 0 (8 bytes, little-endian)
+        assert_eq!(&trailer[8..40], &expected_trailer_blake_hash, "Blake3 hash");
         assert_eq!(
-            &trailer[0..8],
-            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            "Uncompressed size should be 0"
+            &trailer[40..64],
+            &expected_trailer_rs_parity,
+            "Reed-Solomon parity"
         );
-
-        // Blake3 hash of empty data (32 bytes)
-        assert_eq!(&trailer[8..40], &expected_blake_hash, "Blake3 hash");
-
-        // Reed-Solomon parity (32 bytes)
-        assert_eq!(&trailer[40..72], &expected_rs_parity, "RS parity");
 
         assert_eq!(buffer.as_slice(), expected_compressed);
     }
 
-    // Test with single byte - now includes block trailer
+    // Specification: Appendix A.1 Minimal File
     #[test]
     fn test_slz_writer_zero_byte() {
         let expected_compressed: [u8; 173] = hex!(
-            "fedcba9801011f5d1e1ff5ffffffffff
-             ffff000041fef7ffffe00080002d3ade
-             dff11b61f14c886e35afa036736dcd87
-             a74d27b5c1510225d0f592e213c213b1
-             8ea038cbd9669481d7382c07d10c82c2
-             00979933423a3340c248382018000000
-             000000000001000000000000002d3ade
-             dff11b61f14c886e35afa036736dcd87
-             a74d27b5c1510225d0f592e213c213b1
-             8ea038cbd9669481d7382c07d10c82c2
-             00979933423a3340c248382018"
+            "fedcba980100011f5d1ef776ff58259da3edb40b
+             dc53ceb8a7b4e2cf6ec95dc0e75b0b0000000000
+             00402d3adedff11b61f14c886e35afa036736dcd
+             87a74d27b5c1510225d0f592e213e82fafd5acdf
+             4327b2bd4c3f26af861437d52dde78e034b00000
+             41fef7ffffe000800001000000000000802d3ade
+             dff11b61f14c886e35afa036736dcd87a74d27b5
+             c1510225d0f592e213f2cf908ca3803a1f9f80b8
+             2f1873c4581d5507446794e32e"
         );
-        let expected_blake_hash: [u8; 32] =
+        let expected_header_rs_parity: [u8; 24] =
+            hex!("f776ff58259da3edb40bdc53ceb8a7b4e2cf6ec95dc0e75b");
+        let expected_trailer_blake_hash: [u8; 32] =
             hex!("2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213");
-        let expected_rs_parity: [u8; 32] =
-            hex!("c213b18ea038cbd9669481d7382c07d10c82c200979933423a3340c248382018");
+        let expected_trailer_rs_parity: [u8; 24] =
+            hex!("f2cf908ca3803a1f9f80b82f1873c4581d5507446794e32e");
 
         let mut buffer = Vec::new();
 
         let options = SLZOptions {
-            prefilter: Prefilter::Delta { distance: 32 },
+            prefilter: Prefilter::BcjX86,
             dictionary_size_log2: 30,
             lc: 3,
             lp: 0,
@@ -465,107 +449,84 @@ mod tests {
         writer.write_all(&[0x00]).unwrap();
         let _ = writer.finish().unwrap();
 
-        // Total file size should be:
-        //  10 (header with delta properties) +
-        //  83 (block with size + compressed data + block trailer) +
-        //   8 (end marker) +
-        //  72 (final trailer)
-        // = 173 bytes (actual measured)
         assert_eq!(buffer.len(), 173, "Total file size should be 173 bytes");
 
-        let (header, rest) = buffer.split_at(10);
+        let (header, rest) = buffer.split_at(34);
+        let (header, header_parity) = header.split_at(10);
 
-        // Block structure: 8 bytes size + 11 bytes compressed data + 64 bytes block trailer = 83 bytes total
-        let (block_section, final_section) = rest.split_at(83);
-
-        // Then: 8 bytes end marker + 72 bytes final trailer = 80 bytes
-        let (end_marker, final_trailer) = final_section.split_at(8);
-
-        // Magic bytes: 0xFE 0xDC 0xBA 0x98 (4 bytes)
         assert_eq!(header[0], 0xFE, "Magic byte 0");
         assert_eq!(header[1], 0xDC, "Magic byte 1");
         assert_eq!(header[2], 0xBA, "Magic byte 2");
         assert_eq!(header[3], 0x98, "Magic byte 3");
 
-        // Version: 0x01 (1 byte)
         assert_eq!(header[4], 0x01, "Format version should be 1");
+        assert_eq!(header[5], 0x00, "Capabilities should be 0x00");
+        assert_eq!(header[6], 0x01, "Prefilter: BcjX86");
+        assert_eq!(header[7], 31, "Block size exponent should be 31");
+        assert_eq!(header[8], 0x5D, "LZMA properties byte 1");
+        assert_eq!(header[9], 30, "LZMA dict size log2 should be 30");
 
-        // Configuration: Delta filter = 0x01 (1 byte)
-        assert_eq!(header[5], 0x01, "Configuration: Delta filter");
+        assert_eq!(header_parity, expected_header_rs_parity);
 
-        // Block size exponent: 31 (1 byte)
-        assert_eq!(header[6], 31, "Block size exponent should be 31");
+        let (block_header_section, after_block_header) = rest.split_at(64);
 
-        // LZMA properties: 93 ( 2 (pb) * 5 + 0 (lp)) * 9 + 3 (lc)
-        assert_eq!(header[7], 0x5D, "LZMA configuration");
-
-        // LZMA dictionary size: 30 (1 byte)
-        assert_eq!(header[8], 30, "LZMA dictionary size should be 30");
-
-        // Delta distance of 32: 31 = 0x1F (1 byte)
-        assert_eq!(header[9], 0x1F, "Configuration: Delta filter");
-
-        // Block: 8-byte size field + compressed data + 72-byte block trailer
-        let size_with_flag = u64::from_le_bytes([
-            block_section[0],
-            block_section[1],
-            block_section[2],
-            block_section[3],
-            block_section[4],
-            block_section[5],
-            block_section[6],
-            block_section[7],
+        let physical_size_with_flags = u64::from_le_bytes([
+            block_header_section[0],
+            block_header_section[1],
+            block_header_section[2],
+            block_header_section[3],
+            block_header_section[4],
+            block_header_section[5],
+            block_header_section[6],
+            block_header_section[7],
         ]);
-        let is_partial_block = (size_with_flag as i64) < 0;
-        assert!(is_partial_block);
-        let block_size = (-(size_with_flag as i64)) as u64;
-        assert_eq!(block_size, 11, "Block compressed size should be 11 bytes");
-
-        // LZMA payload
         assert_eq!(
-            &block_section[8..19],
+            physical_size_with_flags & (1u64 << 63),
+            0,
+            "Bit 63 should be 0 (block header)"
+        );
+        assert_eq!(
+            physical_size_with_flags & (1u64 << 62),
+            1u64 << 62,
+            "Bit 62 should be 1 (partial block)"
+        );
+
+        let physical_size = physical_size_with_flags & !(3u64 << 62); // Clear both flags
+
+        assert_eq!(physical_size, 11, "Physical size should be 11");
+
+        let (block_data, trailer) = after_block_header.split_at(11);
+
+        assert_eq!(
+            block_data,
             &[
                 0x00, 0x00, 0x41, 0xFE, 0xF7, 0xFF, 0xFF, 0xE0, 0x00, 0x80, 0x00
-            ]
+            ],
+            "LZMA payload"
         );
 
-        // Block trailer starts at offset 8 + 11 = 19
-        let block_trailer = &block_section[19..];
-        assert_eq!(block_trailer.len(), 64, "Block trailer should be 64 bytes");
+        assert_eq!(trailer.len(), 64, "Trailer should be exactly 64 bytes");
 
-        // Block trailer structure: 32 bytes chaining value + 32 bytes RS parity
-
-        // Blake3 hash of empty data (32 bytes)
-        assert_eq!(&block_trailer[..32], &expected_blake_hash, "Blake3 hash");
-
-        // Reed-Solomon parity (32 bytes)
-        assert_eq!(&block_trailer[32..64], &expected_rs_parity, "RS parity");
-
-        // End-of-blocks marker
-        assert_eq!(
-            end_marker,
-            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            "End-of-blocks marker"
-        );
+        let trailer_size_with_flag = u64::from_le_bytes([
+            trailer[0], trailer[1], trailer[2], trailer[3], trailer[4], trailer[5], trailer[6],
+            trailer[7],
+        ]);
 
         assert_eq!(
-            final_trailer.len(),
-            72,
-            "Final trailer should be exactly 72 bytes"
+            trailer_size_with_flag & (1u64 << 63),
+            1u64 << 63,
+            "Trailer should have MSB=1 flag"
         );
 
-        // Total uncompressed size: 1 (8 bytes, little-endian)
+        let uncompressed_size = trailer_size_with_flag & !(1u64 << 63); // Clear flag
+        assert_eq!(uncompressed_size, 1, "Uncompressed size should be 1");
+
+        assert_eq!(&trailer[8..40], &expected_trailer_blake_hash, "Blake3 hash");
         assert_eq!(
-            &final_trailer[0..8],
-            &[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            "Total uncompressed size should be 1"
+            &trailer[40..64],
+            &expected_trailer_rs_parity,
+            "Reed-Solomon parity"
         );
-
-        // Blake3 hash of empty data (32 bytes)
-        assert_eq!(&final_trailer[8..40], &expected_blake_hash, "Blake3 hash");
-
-        // Reed-Solomon parity (32 bytes)
-        assert_eq!(&final_trailer[40..72], &expected_rs_parity, "RS parity");
 
         assert_eq!(buffer.as_slice(), expected_compressed);
     }

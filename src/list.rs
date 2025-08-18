@@ -72,7 +72,6 @@ pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
 fn format_prefilter(prefilter: &Prefilter) -> String {
     match prefilter {
         Prefilter::None => "None".to_string(),
-        Prefilter::Delta { distance } => format!("Delta (distance: {})", distance),
         Prefilter::BcjX86 => "BCJ x86".to_string(),
         Prefilter::BcjArm => "BCJ ARM".to_string(),
         Prefilter::BcjArmThumb => "BCJ ARM Thumb".to_string(),

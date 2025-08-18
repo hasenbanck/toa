@@ -5,20 +5,29 @@
 //! - Field: GF(2^8) = GF(256)
 //! - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
 //! - Generator: α = 2
-//! - Code: (n=64, k=32, t=16)
+//! - Code: (n=64, k=40, t=12)
 //!
 //! ## License
 //!
 //! The code in this file is in the public domain or can be licensed under the Apache 2 License.
 
 /// The size of the data payload.
-pub const DATA_LEN: usize = 32;
+pub const DATA_LEN: usize = 40;
 
 /// The size of the parity bytes.
-pub const PARITY_LEN: usize = 32;
+pub const PARITY_LEN: usize = 24;
 
 /// Overall codeword size.
 pub const CODEWORD_SIZE: usize = DATA_LEN + PARITY_LEN;
+
+/// The size of the shortened data payload (10 bytes).
+pub const SHORTENED_DATA_LEN: usize = 10;
+
+/// The size of the shortened parity bytes (24 bytes).
+pub const SHORTENED_PARITY_LEN: usize = 24;
+
+/// Overall shortened codeword size (34 bytes).
+pub const SHORTENED_CODEWORD_SIZE: usize = SHORTENED_DATA_LEN + SHORTENED_PARITY_LEN;
 
 /// Safe upper bound for intermediate polynomials.
 const MAX_POLY: usize = CODEWORD_SIZE;
@@ -308,7 +317,7 @@ fn berlekamp_massey(synd: &[u8], lambda_out: &mut [u8], lambda_len: &mut usize) 
     }
 }
 
-/// Encode 32 bytes parity for 32 bytes data.
+/// Encode 32-byte data with RS(64,32) protection.
 ///
 /// This implementation uses a LFSR-based method.
 pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
@@ -334,6 +343,13 @@ pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
     }
 
     remainder
+}
+
+/// Encode 10-byte data with shortened RS(34,10) protection.
+pub fn encode_34_10(data: &[u8; SHORTENED_DATA_LEN]) -> [u8; SHORTENED_PARITY_LEN] {
+    let mut padded_data = [0u8; DATA_LEN];
+    padded_data[30..].copy_from_slice(data);
+    encode(&padded_data)
 }
 
 fn calculate_syndromes(c: &mut [u8; CODEWORD_SIZE], syndrome: &mut [u8; PARITY_LEN]) -> bool {
@@ -493,13 +509,13 @@ fn verify_correction(codeword_poly: &[u8; CODEWORD_SIZE]) -> bool {
     true
 }
 
-/// Decode codeword in-place (data || parity).
+/// Decode codeword in-place (data || parity) for RS(64,40).
 ///
 /// Returns false if the data was not corrupted. False if the data was corrected but could be
 /// corrected. Returns an error if the data was corrupted and could not be corrected.
 ///
 /// The decoder is a classic Peterson–Gorenstein–Zierler decoder.
-pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
+pub fn decode_64_40(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
     // The received codeword polynomial is C(x) = D(x) * x^32 + P(x).
     // Our arrays store coefficients from the lowest degree to highest, so we arrange it as:
     // c = [p_0, p_1, ..., p_31, d_0, d_1, ..., d_31]
@@ -543,6 +559,17 @@ pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> 
     Ok(true)
 }
 
+/// Decode codeword in-place (data || parity) for shortened RS(34,10).
+///
+/// Returns Ok(true) if errors were corrected, Ok(false) if no errors, Err if uncorrectable.
+pub fn decode_34_10(codeword: &mut [u8; SHORTENED_CODEWORD_SIZE]) -> Result<bool, &'static str> {
+    let mut full_codeword = [0u8; CODEWORD_SIZE];
+    full_codeword[30..].copy_from_slice(codeword);
+    let result = decode_64_40(&mut full_codeword)?;
+    codeword.copy_from_slice(&full_codeword[30..]);
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use hex_literal::hex;
@@ -578,7 +605,7 @@ mod tests {
         cw[..DATA_LEN].copy_from_slice(&data);
         cw[DATA_LEN..].copy_from_slice(&parity);
 
-        decode(&mut cw).expect("should decode with no errors");
+        decode_64_40(&mut cw).expect("should decode with no errors");
 
         assert_eq!(cw[..DATA_LEN], data);
     }
@@ -599,8 +626,8 @@ mod tests {
             cw[..DATA_LEN].copy_from_slice(&data);
             cw[DATA_LEN..].copy_from_slice(&parity);
 
-            // Introduce up to 16 unique errors.
-            let errors = 1 + (rng.next_usize(16));
+            // Introduce up to 12 unique errors (RS(64,40) can correct up to 12 errors)
+            let errors = 1 + (rng.next_usize(12));
             let mut positions = [usize::MAX; PARITY_LEN];
             let mut count = 0usize;
             while count < errors {
@@ -627,7 +654,7 @@ mod tests {
                 cw[p] ^= v;
             }
 
-            decode(&mut cw).expect("should decode correctable errors");
+            decode_64_40(&mut cw).expect("should decode correctable errors");
 
             assert_eq!(cw[..DATA_LEN], data);
         }
@@ -676,12 +703,12 @@ mod tests {
             cw[p] ^= v;
         }
 
-        let res = decode(&mut cw);
+        let res = decode_64_40(&mut cw);
 
         assert!(res.is_err(), "decoding should fail with too many errors");
     }
 
-    fn test_vector(data: [u8; 32], expected_parity: [u8; 32]) {
+    fn test_vector(data: [u8; 40], expected_parity: [u8; 24]) {
         let parity = encode(&data);
 
         assert_eq!(parity, expected_parity);
@@ -690,51 +717,72 @@ mod tests {
         cw[..DATA_LEN].copy_from_slice(&data);
         cw[DATA_LEN..].copy_from_slice(&parity);
 
-        decode(&mut cw).expect("should decode with no errors");
+        decode_64_40(&mut cw).expect("should decode with no errors");
 
         assert_eq!(cw[..DATA_LEN], data);
     }
 
     #[test]
     fn test_specification_test_vector_1() {
-        let data = hex!("0000000000000000000000000000000000000000000000000000000000000000");
-        let expected_parity =
-            hex!("0000000000000000000000000000000000000000000000000000000000000000");
+        let data = hex!(
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        );
+        let expected_parity = hex!("000000000000000000000000000000000000000000000000");
         test_vector(data, expected_parity);
         test_vector(data, expected_parity);
     }
 
     #[test]
     fn test_specification_test_vector_2() {
-        let data = hex!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        let expected_parity =
-            hex!("caabc74d87d23ad8a0a2bff5134bf7499e1b2859fb692e40b8d8e6fa8bfb5620");
+        let data = hex!(
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        );
+        let expected_parity = hex!("e81d42b0548bfb1c5e9d0475a75446c6bda44e0b8ea6e459");
         test_vector(data, expected_parity);
     }
 
     #[test]
     fn test_specification_test_vector_3() {
-        let data = hex!("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let expected_parity =
-            hex!("d8e4dab6534b241cb9afcb999503ec2d8c393a30f96e719970cee1d547f75acb");
+        let data = hex!(
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627"
+        );
+        let expected_parity = hex!("9fb10923191a0659292e6e7c5ee8fbf0111329eb8bdaefe8");
         test_vector(data, expected_parity);
         test_vector(data, expected_parity);
     }
 
-    #[test]
-    fn test_specification_test_vector_4() {
-        let data = hex!("dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f");
-        let expected_parity =
-            hex!("0e54d343ed7e6ffaf7e650525685934403006ad1428d2c9d0869b67b1920bea6");
-        test_vector(data, expected_parity);
-        test_vector(data, expected_parity);
+    fn test_vector_34_10(data: [u8; 10], expected_parity: [u8; 24]) {
+        let parity = encode_34_10(&data);
+
+        assert_eq!(parity, expected_parity);
+
+        let mut cw = [0u8; SHORTENED_CODEWORD_SIZE];
+        cw[..SHORTENED_DATA_LEN].copy_from_slice(&data);
+        cw[SHORTENED_DATA_LEN..].copy_from_slice(&parity);
+
+        decode_34_10(&mut cw).expect("should decode with no errors");
+
+        assert_eq!(&cw[..SHORTENED_DATA_LEN], &data);
     }
 
     #[test]
-    fn test_specification_test_vector_5() {
-        let data = hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
-        let expected_parity =
-            hex!("cedfc1cc789afb176bf1fb71a6756a5b315bdbc2322f987ff3aa7b0c7c2a6a7d");
-        test_vector(data, expected_parity);
+    fn test_rs_34_10_specification_test_vector_1() {
+        let data = hex!("00000000000000000000");
+        let expected_parity = hex!("000000000000000000000000000000000000000000000000");
+        test_vector_34_10(data, expected_parity);
+    }
+
+    #[test]
+    fn test_rs_34_10_specification_test_vector_2() {
+        let data = hex!("ffffffffffffffffffff");
+        let expected_parity = hex!("a13722e7a3f27fe7702b64bdb2fad7bbb4eff74838d4c490");
+        test_vector_34_10(data, expected_parity);
+    }
+
+    #[test]
+    fn test_rs_34_10_specification_test_vector_3() {
+        let data = hex!("00010203040506070809");
+        let expected_parity = hex!("39e7d8f19efea4e2eadeb2547f7984bfa1949c9f75cddd90");
+        test_vector_34_10(data, expected_parity);
     }
 }

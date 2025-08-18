@@ -1,10 +1,12 @@
 use super::{
-    ByteReader, ByteWriter, Prefilter, Read, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write,
-    error_invalid_data, error_unsupported, lzma,
+    ByteWriter, Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
+    error_unsupported, lzma, reed_solomon,
 };
+use crate::reed_solomon::decode_64_40;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SLZHeader {
+    pub(crate) capabilities: u8,
     pub(crate) prefilter: Prefilter,
     pub(crate) block_size_exponent: u8,
     pub(crate) lc: u8,
@@ -16,6 +18,7 @@ pub(crate) struct SLZHeader {
 impl SLZHeader {
     pub(crate) fn from_options(options: &SLZOptions) -> Self {
         Self {
+            capabilities: 0x00, // Currently set to 0x00 per specification
             prefilter: options.prefilter,
             block_size_exponent: options.block_size_exponent.unwrap_or(62),
             lc: options.lc,
@@ -34,32 +37,49 @@ impl SLZHeader {
         2u64.pow(self.block_size_exponent as u32)
     }
 
-    pub(crate) fn parse<R: Read>(mut reader: R) -> crate::Result<SLZHeader> {
-        // Read and verify magic bytes.
-        let mut magic = [0u8; 4];
-        reader.read_exact(&mut magic)?;
+    pub(crate) fn parse(
+        buffer: &[u8; reed_solomon::SHORTENED_CODEWORD_SIZE],
+        apply_rs_correction: bool,
+    ) -> crate::Result<SLZHeader> {
+        let mut corrected_buffer = *buffer;
 
-        if magic != SLZ_MAGIC {
+        if apply_rs_correction {
+            let mut header_codeword = *buffer;
+
+            let corrected = reed_solomon::decode_34_10(&mut header_codeword)
+                .map_err(|_| error_invalid_data("header Reed-Solomon correction failed"))?;
+
+            if corrected {
+                eprintln!("Header errors detected and corrected by Reed-Solomon");
+                corrected_buffer = header_codeword;
+            }
+        }
+
+        if corrected_buffer[0..4] != SLZ_MAGIC {
             return Err(error_invalid_data("invalid SLZ magic bytes"));
         }
 
-        // Read and verify version.
-        let version = reader.read_u8()?;
+        let version = corrected_buffer[4];
         if version != SLZ_VERSION {
             return Err(error_unsupported("unsupported SLZ version"));
         }
 
-        // Read prefilter
-        let prefilter_byte = reader.read_u8()?;
+        let capabilities = corrected_buffer[5];
+        if capabilities != 0x00 {
+            return Err(error_unsupported("unsupported SLZ capabilities"));
+        }
 
-        // Read block size exponent
-        let block_size_exponent = reader.read_u8()?;
+        let prefilter_byte = corrected_buffer[6];
+        let prefilter = Prefilter::try_from(prefilter_byte)
+            .map_err(|_| error_invalid_data("unsupported prefilter type"))?;
+
+        let block_size_exponent = corrected_buffer[7];
         if !(16u8..=62u8).contains(&block_size_exponent) {
             return Err(error_invalid_data("invalid block size exponent"));
         }
 
-        // Read LZMA properties.
-        let props = reader.read_u8()?;
+        let lzma_props = u16::from_le_bytes([corrected_buffer[8], corrected_buffer[9]]);
+        let props = (lzma_props & 0xFF) as u8;
         let lc = props % 9;
         let temp = props / 9;
         let lp = temp % 5;
@@ -69,34 +89,13 @@ impl SLZHeader {
             return Err(error_invalid_data("invalid LZMA properties"));
         }
 
-        // Read dictionary size.
-        let dict_size_log2 = reader.read_u8()?;
+        let dict_size_log2 = ((lzma_props >> 8) & 0xFF) as u8;
         if !(16u8..=31u8).contains(&dict_size_log2) {
             return Err(error_invalid_data("invalid dictionary size"));
         }
 
-        // Read the optional prefilter configuration.
-        let prefilter = match prefilter_byte {
-            0x00 => Prefilter::None,
-            0x01 => {
-                // Delta filter - need to read distance.
-                let distance_byte = reader.read_u8()?;
-                Prefilter::Delta {
-                    distance: (distance_byte as u16) + 1,
-                }
-            }
-            0x02 => Prefilter::BcjX86,
-            0x03 => Prefilter::BcjArm,
-            0x04 => Prefilter::BcjArmThumb,
-            0x05 => Prefilter::BcjArm64,
-            0x06 => Prefilter::BcjSparc,
-            0x07 => Prefilter::BcjPowerPc,
-            0x08 => Prefilter::BcjIa64,
-            0x09 => Prefilter::BcjRiscV,
-            _ => return Err(error_invalid_data("unsupported prefilter type")),
-        };
-
         Ok(SLZHeader {
+            capabilities,
             prefilter,
             block_size_exponent,
             lc,
@@ -107,24 +106,120 @@ impl SLZHeader {
     }
 
     pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        writer.write_all(&SLZ_MAGIC)?;
+        let mut payload = [0u8; reed_solomon::SHORTENED_DATA_LEN];
 
-        writer.write_u8(SLZ_VERSION)?;
+        payload[0..4].copy_from_slice(&SLZ_MAGIC);
 
-        let config = u8::from(self.prefilter);
-        writer.write_u8(config)?;
+        payload[4] = SLZ_VERSION;
+        payload[5] = self.capabilities;
 
-        writer.write_u8(self.block_size_exponent)?;
+        payload[6] = u8::from(self.prefilter);
+        payload[7] = self.block_size_exponent;
 
-        let lzma_props = (self.pb * 5 + self.lp) * 9 + self.lc;
-        writer.write_u8(lzma_props)?;
+        let lzma_props_byte = (self.pb * 5 + self.lp) * 9 + self.lc;
+        let lzma_props = u16::from_le_bytes([lzma_props_byte, self.dict_size_log2]);
+        payload[8..10].copy_from_slice(&lzma_props.to_le_bytes());
 
-        writer.write_u8(self.dict_size_log2)?;
+        let parity = reed_solomon::encode_34_10(&payload);
 
-        if let Prefilter::Delta { distance } = self.prefilter {
-            writer.write_u8(distance as u8 - 1)?;
-        }
+        writer.write_all(&payload)?;
+        writer.write_all(&parity)?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SLZBlockHeader {
+    pub(crate) physical_size_with_flags: u64,
+    pub(crate) blake3_hash: [u8; 32],
+    pub(crate) rs_parity: [u8; 24],
+}
+
+impl SLZBlockHeader {
+    /// Create a block header with appropriate MSB flags.
+    pub(crate) fn new(physical_size: u64, is_partial: bool, blake3_hash: [u8; 32]) -> Self {
+        // Clear top 2 bits
+        let mut physical_size_with_flags = physical_size & !(0b11u64 << 62);
+
+        if is_partial {
+            // Set partial block flag
+            physical_size_with_flags |= 1u64 << 62;
+        }
+
+        let mut payload = [0u8; 40];
+        payload[..8].copy_from_slice(&physical_size_with_flags.to_le_bytes());
+        payload[8..].copy_from_slice(&blake3_hash);
+        let rs_parity = reed_solomon::encode(&payload);
+        Self {
+            physical_size_with_flags,
+            blake3_hash,
+            rs_parity,
+        }
+    }
+
+    pub(crate) fn parse(
+        buffer: &[u8; reed_solomon::CODEWORD_SIZE],
+        apply_rs_correction: bool,
+    ) -> crate::Result<SLZBlockHeader> {
+        let mut corrected_buffer = *buffer;
+
+        if apply_rs_correction {
+            let mut codeword = [0u8; 64];
+            codeword.copy_from_slice(buffer);
+
+            match decode_64_40(&mut codeword) {
+                Ok(corrected) => {
+                    if corrected {
+                        eprintln!("block header errors detected and corrected by Reed-Solomon");
+                        corrected_buffer.copy_from_slice(&codeword);
+                    }
+                }
+                Err(_) => {
+                    return Err(error_invalid_data(
+                        "block header Reed-Solomon correction failed",
+                    ));
+                }
+            }
+        }
+
+        let physical_size_with_flags = u64::from_le_bytes([
+            corrected_buffer[0],
+            corrected_buffer[1],
+            corrected_buffer[2],
+            corrected_buffer[3],
+            corrected_buffer[4],
+            corrected_buffer[5],
+            corrected_buffer[6],
+            corrected_buffer[7],
+        ]);
+
+        let mut blake3_hash = [0u8; 32];
+        blake3_hash.copy_from_slice(&corrected_buffer[8..40]);
+
+        let mut rs_parity = [0u8; 24];
+        rs_parity.copy_from_slice(&corrected_buffer[40..64]);
+
+        Ok(SLZBlockHeader {
+            physical_size_with_flags,
+            blake3_hash,
+            rs_parity,
+        })
+    }
+
+    /// Get the physical block size without flag bits.
+    pub(crate) fn physical_size(&self) -> u64 {
+        self.physical_size_with_flags & !(0b11u64 << 62)
+    }
+
+    /// Check if this is a partial block (only allowed as the final block).
+    pub(crate) fn is_partial_block(&self) -> bool {
+        (self.physical_size_with_flags & (1u64 << 62)) != 0
+    }
+
+    pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+        writer.write_u64(self.physical_size_with_flags)?;
+        writer.write_all(&self.blake3_hash)?;
+        writer.write_all(&self.rs_parity)
     }
 }

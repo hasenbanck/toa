@@ -62,6 +62,13 @@ impl SLZMetadata {
         }
 
         let prefilter_byte = reader.read_u8()?;
+        let prefilter = match Prefilter::try_from(prefilter_byte) {
+            Ok(prefilter) => prefilter,
+            Err(_) => {
+                reader.seek(SeekFrom::Start(original_pos))?;
+                return Err(error_invalid_data("unsupported prefilter type"));
+            }
+        };
 
         let block_size_exponent = reader.read_u8()?;
         if !(16u8..=62u8).contains(&block_size_exponent) {
@@ -87,28 +94,6 @@ impl SLZMetadata {
             return Err(error_invalid_data("invalid dictionary size"));
         }
         let dict_size = 2u32.pow(dict_size_log2 as u32);
-
-        let prefilter = match prefilter_byte {
-            0x00 => Prefilter::None,
-            0x01 => {
-                let distance_byte = reader.read_u8()?;
-                Prefilter::Delta {
-                    distance: (distance_byte as u16) + 1,
-                }
-            }
-            0x02 => Prefilter::BcjX86,
-            0x03 => Prefilter::BcjArm,
-            0x04 => Prefilter::BcjArmThumb,
-            0x05 => Prefilter::BcjArm64,
-            0x06 => Prefilter::BcjSparc,
-            0x07 => Prefilter::BcjPowerPc,
-            0x08 => Prefilter::BcjIa64,
-            0x09 => Prefilter::BcjRiscV,
-            _ => {
-                reader.seek(SeekFrom::Start(original_pos))?;
-                return Err(error_invalid_data("unsupported prefilter type"));
-            }
-        };
 
         let mut compressed_size = 0u64;
 
@@ -151,7 +136,7 @@ impl SLZMetadata {
         let mut validated = true;
         let mut corrected = false;
 
-        match reed_solomon::decode(&mut codeword) {
+        match reed_solomon::decode_64_40(&mut codeword) {
             Ok(was_corrected) => {
                 if was_corrected {
                     blake3_hash.copy_from_slice(&codeword[..32]);

@@ -4,18 +4,13 @@ pub use streaming_reader::SLZStreamingReader;
 
 use crate::{
     Prefilter, Read, Result,
-    lzma::{
-        filter::{bcj::BCJReader, delta::DeltaReader},
-        lzma_reader::LZMAReader,
-        optimized_reader::OptimizedReader,
-    },
+    lzma::{filter::bcj::BCJReader, lzma_reader::LZMAReader, optimized_reader::OptimizedReader},
 };
 
 /// All possible reader combinations.
 #[allow(clippy::large_enum_variant)]
 enum Reader<R> {
     Lzma(LZMAReader<R>),
-    Delta(DeltaReader<LZMAReader<R>>),
     BcjX86(BCJReader<LZMAReader<R>>),
     BcjArm(BCJReader<LZMAReader<R>>),
     BcjArmThumb(BCJReader<LZMAReader<R>>),
@@ -30,7 +25,6 @@ impl<R: OptimizedReader> Read for Reader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self {
             Reader::Lzma(reader) => reader.read(buf),
-            Reader::Delta(reader) => reader.read(buf),
             Reader::BcjX86(reader) => reader.read(buf),
             Reader::BcjArm(reader) => reader.read(buf),
             Reader::BcjArmThumb(reader) => reader.read(buf),
@@ -66,7 +60,6 @@ impl<R: OptimizedReader> Reader<R> {
         #[rustfmt::skip]
         let chain = match prefilter {
             Prefilter::None => Reader::Lzma(lzma_reader),
-            Prefilter::Delta { distance } => Reader::Delta(DeltaReader::new(lzma_reader, distance as usize)),
             Prefilter::BcjX86 => Reader::BcjX86(BCJReader::new_x86(lzma_reader, 0)),
             Prefilter::BcjArm => Reader::BcjArm(BCJReader::new_arm(lzma_reader, 0)),
             Prefilter::BcjArmThumb => Reader::BcjArmThumb(BCJReader::new_arm_thumb(lzma_reader, 0)),
@@ -84,7 +77,6 @@ impl<R: OptimizedReader> Reader<R> {
     fn into_inner(self) -> R {
         match self {
             Reader::Lzma(reader) => reader.into_inner(),
-            Reader::Delta(reader) => reader.into_inner().into_inner(),
             Reader::BcjX86(reader) => reader.into_inner().into_inner(),
             Reader::BcjArm(reader) => reader.into_inner().into_inner(),
             Reader::BcjArmThumb(reader) => reader.into_inner().into_inner(),
