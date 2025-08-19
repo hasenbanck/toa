@@ -263,3 +263,53 @@ impl SLZBlockHeader {
         writer.write_all(&header_bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slz_header_roundtrip() {
+        let options = SLZOptions::from_preset(5)
+            .with_prefilter(Prefilter::BcjX86)
+            .with_block_size_exponent(Some(20));
+
+        let header = SLZHeader::from_options(&options);
+
+        let mut buffer = Vec::new();
+        header.write(&mut buffer).unwrap();
+
+        let mut header_array = [0u8; 34];
+        header_array.copy_from_slice(&buffer);
+        let parsed_header = SLZHeader::parse(&header_array, true).unwrap();
+
+        assert_eq!(parsed_header.capabilities(), header.capabilities());
+        assert_eq!(parsed_header.prefilter(), header.prefilter());
+        assert_eq!(parsed_header.lc(), header.lc());
+        assert_eq!(parsed_header.lp(), header.lp());
+        assert_eq!(parsed_header.pb(), header.pb());
+        assert_eq!(parsed_header.dict_size(), header.dict_size());
+        assert_eq!(parsed_header.block_size(), header.block_size());
+    }
+
+    #[test]
+    fn test_slz_block_header_roundtrip() {
+        let physical_size = 65536;
+        let is_partial = false;
+        let blake3_hash = [42u8; 32];
+
+        let block_header = SLZBlockHeader::new(physical_size, is_partial, blake3_hash);
+
+        let mut buffer = Vec::new();
+        block_header.write(&mut buffer).unwrap();
+
+        let mut header_array = [0u8; 64];
+        header_array.copy_from_slice(&buffer);
+        let parsed_header = SLZBlockHeader::parse(&header_array, true).unwrap();
+
+        assert_eq!(parsed_header.physical_size(), physical_size);
+        assert_eq!(parsed_header.is_partial_block(), is_partial);
+        assert_eq!(parsed_header.blake3_hash(), blake3_hash);
+        assert_eq!(parsed_header.rs_parity(), block_header.rs_parity());
+    }
+}

@@ -115,8 +115,12 @@ mod tests {
         buffer_array.copy_from_slice(&buffer);
         let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
 
-        assert_eq!(parsed_trailer.total_uncompressed_size(), total_size);
-        assert_eq!(parsed_trailer.blake3_hash, blake3_hash);
+        assert_eq!(
+            parsed_trailer.total_uncompressed_size(),
+            trailer.total_uncompressed_size()
+        );
+        assert_eq!(parsed_trailer.blake3_hash(), trailer.blake3_hash());
+        assert_eq!(parsed_trailer.rs_parity(), trailer.rs_parity());
     }
 
     #[test]
@@ -134,7 +138,7 @@ mod tests {
         let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
 
         assert_eq!(parsed_trailer.total_uncompressed_size(), 0);
-        assert_eq!(parsed_trailer.blake3_hash, [0u8; 32]);
+        assert_eq!(parsed_trailer.blake3_hash(), [0u8; 32]);
     }
 
     #[test]
@@ -155,7 +159,7 @@ mod tests {
         let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
 
         assert_eq!(parsed_trailer.total_uncompressed_size(), total_size);
-        assert_eq!(parsed_trailer.blake3_hash, blake3_hash);
+        assert_eq!(parsed_trailer.blake3_hash(), blake3_hash);
     }
 
     #[test]
