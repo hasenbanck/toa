@@ -64,19 +64,8 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
         let mut header_data = [0u8; 64];
         inner.read_exact(&mut header_data)?;
 
-        let size_with_flags = u64::from_le_bytes([
-            header_data[0],
-            header_data[1],
-            header_data[2],
-            header_data[3],
-            header_data[4],
-            header_data[5],
-            header_data[6],
-            header_data[7],
-        ]);
-
-        // Check MSB (bit 63) to determine if this is final trailer or block header.
-        match (size_with_flags & (1u64 << 63)) != 0 {
+        // Check bit 63 (MSB) to determine if this is a block header or final trailer.
+        match (header_data[7] & 0x80) != 0 {
             true => {
                 // MSB=1: This is the final trailer.
                 self.blocks_finished = true;

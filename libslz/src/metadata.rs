@@ -63,13 +63,8 @@ impl SLZMetadata {
             let mut buffer = [0u8; 64];
             reader.read_exact(&mut buffer)?;
 
-            let size_with_flags = u64::from_le_bytes([
-                buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6],
-                buffer[7],
-            ]);
-
             // Check bit 63 (MSB) to determine if this is a block header or final trailer.
-            if (size_with_flags & (1u64 << 63)) != 0 {
+            if (buffer[7] & 0x80) != 0 {
                 let trailer_result = SLZFileTrailer::parse(&buffer, true);
                 let (trailer, validated, corrected) = match trailer_result {
                     Ok(trailer) => (trailer, true, false),
