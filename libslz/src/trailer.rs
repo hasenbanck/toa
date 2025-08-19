@@ -1,26 +1,31 @@
-use super::{ByteWriter, Write, error_invalid_data, reed_solomon, reed_solomon::decode_64_40};
+use super::{ByteWriter, Write, error_invalid_data, reed_solomon::code_64_40};
 
 /// File trailer containing total uncompressed size, root hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SLZFileTrailer {
-    /// Total uncompressed byte size for all blocks.
-    pub(crate) total_uncompressed_size: u64,
-    /// Blake3 root hash of the entire file.
+    pub(crate) total_uncompressed_size_with_flags: u64,
     pub(crate) blake3_hash: [u8; 32],
     pub(crate) rs_parity: [u8; 24],
 }
 
 impl SLZFileTrailer {
     pub(crate) fn new(total_uncompressed_size: u64, blake3_hash: [u8; 32]) -> Self {
+        let total_uncompressed_size_with_flags = total_uncompressed_size | (1u64 << 63);
+
         let mut payload = [0u8; 40];
-        payload[..8].copy_from_slice(&total_uncompressed_size.to_le_bytes());
+        payload[..8].copy_from_slice(&total_uncompressed_size_with_flags.to_le_bytes());
         payload[8..].copy_from_slice(&blake3_hash);
-        let rs_parity = reed_solomon::encode(&payload);
+        let rs_parity = code_64_40::encode(&payload);
         Self {
-            total_uncompressed_size,
+            total_uncompressed_size_with_flags,
             blake3_hash,
             rs_parity,
         }
+    }
+
+    /// Get the total uncompressed size without flag bits.
+    pub(crate) fn total_uncompressed_size(&self) -> u64 {
+        self.total_uncompressed_size_with_flags & !(1u64 << 63)
     }
 
     pub(crate) fn parse(
@@ -33,7 +38,7 @@ impl SLZFileTrailer {
             let mut codeword = [0u8; 64];
             codeword.copy_from_slice(buffer);
 
-            match decode_64_40(&mut codeword) {
+            match code_64_40::decode(&mut codeword) {
                 Ok(corrected) => {
                     if corrected {
                         eprintln!("final trailer errors detected and corrected by Reed-Solomon");
@@ -48,7 +53,7 @@ impl SLZFileTrailer {
             }
         }
 
-        let size_with_flag = u64::from_le_bytes([
+        let total_uncompressed_size_with_flags = u64::from_le_bytes([
             corrected_buffer[0],
             corrected_buffer[1],
             corrected_buffer[2],
@@ -59,9 +64,6 @@ impl SLZFileTrailer {
             corrected_buffer[7],
         ]);
 
-        // Strip MSB=1 flag to get actual uncompressed size
-        let total_uncompressed_size = size_with_flag & !(1u64 << 63);
-
         let mut blake3_hash = [0u8; 32];
         blake3_hash.copy_from_slice(&corrected_buffer[8..40]);
 
@@ -69,16 +71,14 @@ impl SLZFileTrailer {
         rs_parity.copy_from_slice(&corrected_buffer[40..64]);
 
         Ok(SLZFileTrailer {
-            total_uncompressed_size,
+            total_uncompressed_size_with_flags,
             blake3_hash,
             rs_parity,
         })
     }
 
     pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        // Write size with MSB=1 to indicate final trailer
-        let size_with_flag = self.total_uncompressed_size | (1u64 << 63);
-        writer.write_u64(size_with_flag)?;
+        writer.write_u64(self.total_uncompressed_size_with_flags)?;
         writer.write_all(&self.blake3_hash)?;
         writer.write_all(&self.rs_parity)
     }
@@ -102,7 +102,7 @@ mod tests {
         buffer_array.copy_from_slice(&buffer);
         let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
 
-        assert_eq!(parsed_trailer.total_uncompressed_size, total_size);
+        assert_eq!(parsed_trailer.total_uncompressed_size(), total_size);
         assert_eq!(parsed_trailer.blake3_hash, blake3_hash);
     }
 
@@ -120,7 +120,7 @@ mod tests {
         buffer_array.copy_from_slice(&buffer);
         let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
 
-        assert_eq!(parsed_trailer.total_uncompressed_size, 0);
+        assert_eq!(parsed_trailer.total_uncompressed_size(), 0);
         assert_eq!(parsed_trailer.blake3_hash, [0u8; 32]);
     }
 
@@ -141,7 +141,7 @@ mod tests {
         buffer_array.copy_from_slice(&buffer);
         let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
 
-        assert_eq!(parsed_trailer.total_uncompressed_size, total_size);
+        assert_eq!(parsed_trailer.total_uncompressed_size(), total_size);
         assert_eq!(parsed_trailer.blake3_hash, blake3_hash);
     }
 

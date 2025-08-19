@@ -2,7 +2,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use crate::{
     ByteReader, Prefilter, SLZ_MAGIC, SLZ_VERSION, error_invalid_data, error_unsupported,
-    reed_solomon,
+    reed_solomon::code_64_40,
 };
 
 /// Metadata information from an SLZ file.
@@ -136,7 +136,7 @@ impl SLZMetadata {
         let mut validated = true;
         let mut corrected = false;
 
-        match reed_solomon::decode_64_40(&mut codeword) {
+        match code_64_40::decode(&mut codeword) {
             Ok(was_corrected) => {
                 if was_corrected {
                     blake3_hash.copy_from_slice(&codeword[..32]);

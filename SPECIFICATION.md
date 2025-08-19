@@ -92,10 +92,72 @@ Decoders MUST reject files with unsupported version numbers.
 
 ### 3.3 Capabilities
 
-One byte reserved for future capabilities. Currently set to 0x00.
+One byte indicating optional features:
 
-Future versions may use this field to indicate optional features such as different error correction levels
-for compressed data.
+- **Bits 0-1**: Reed-Solomon data protection level
+    - `0b00`: None (Only the metadata is protected)
+    - `0b01`: Light - RS(255,239), 6.3% overhead, corrects up to 8 bytes per 255
+    - `0b10`: Standard - RS(255,223), 12.5% overhead, corrects 16 up to bytes per 255
+    - `0b11`: Heavy - RS(255,191), 25% overhead, corrects up to 32 bytes per 255
+- **Bits 2-7**: Reserved (must be 0)
+
+When Reed-Solomon data protection is enabled (bits 0-1 ≠ 0b00), compressed block data is encoded as consecutive
+Reed-Solomon codewords. The first byte of the first codeword contains the padding size, indicating how many zero padding
+bytes were added at the end of the last codeword's data section.
+
+**Reed-Solomon Parameters**:
+
+All data protection levels use the same field parameters as the metadata protection:
+
+- Field: GF(2^8)
+- Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
+- Generator: α = 2
+
+**Reed-Solomon Protected Data Structure**:
+
+```
++--------------------------------+
+| RS Codeword 0                  |
+|   Padding size (1 byte)        |  Number of padding bytes in last codeword
+|   Data (≤ data_len-1 bytes)    |  First part of compressed data
+|   Parity (parity_len bytes)    |  RS parity bytes
++--------------------------------+
+| RS Codeword 1                  |
+|   Data (data_len bytes)        |  Continuation of compressed data
+|   Parity (parity_len bytes)    |  RS parity bytes
++--------------------------------+
+|             ...                |
++--------------------------------+
+| RS Codeword N                  |
+|   Data (data_len bytes)        |  Last part of compressed data + zero padding
+|   Parity (parity_len bytes)    |  RS parity bytes
++--------------------------------+
+```
+
+Where `data_len` and `parity_len` depend on the protection level:
+
+- Light: data_len = 239, parity_len = 16
+- Standard: data_len = 223, parity_len = 32
+- Heavy: data_len = 191, parity_len = 64
+
+**Calculating Actual Compressed Size**:
+
+Given the physical block size from the block header and the padding size from the first codeword:
+
+```
+num_codewords = physical_block_size / 255
+total_data_capacity = (num_codewords * data_len) - 1  // -1 for padding size byte
+actual_compressed_size = total_data_capacity - padding_size
+```
+
+**Example**: For RS(255,223) protection with a physical block size of 1020 bytes:
+
+- Number of codewords: 1020 / 255 = 4
+- Total data capacity: (4 × 223) - 1 = 891 bytes
+- If padding_size = 5: actual compressed size = 891 - 5 = 886 bytes
+
+This design maintains the streaming-friendly property of the format, as the decoder can process the first codeword, read
+the padding size, and then correctly extract the exact amount of compressed data while discarding padding bytes.
 
 ### 3.4 Prefilter Selection
 
@@ -162,16 +224,14 @@ well for most data, BCJ filters benefit from adjusted parameters. For example:
 
 ### 3.7 Reed-Solomon Protection
 
-The header is protected by 24 bytes of Reed-Solomon parity using a shortened RS(34,10) code.
-This is derived from the same RS(64,40) code used for blocks but shortened to accommodate
-the 10-byte header payload.
+The header is protected by 24 bytes of Reed-Solomon parity using RS(34,10) code.
 
 Parameters:
 
 - Field: GF(2^8)
 - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-- Code: Shortened RS(34,10) from RS(64,40)
 - Generator: α = 2
+- Code: RS(34,10)
 
 ## 4. Blocks Section
 
@@ -562,11 +622,10 @@ With block headers, the format enables:
 
 ### 10.4 Reed-Solomon Implementation
 
-The RS(64,40) code provides robust error correction:
+The RS(64,40) and RS(34,10) codes provide robust error correction:
 
-- Can correct up to 12 byte errors in the 40-byte payload
-- Same code structure for blocks and trailer
-- Shortened RS(34,10) for header derived from same base code
+- Can correct up to 12 byte errors in the 40-byte payload (block header, file trailer)
+- Can correct up to 12 byte errors in the 10-byte payload (file header)
 - Efficient implementations available in many languages
 
 ## 11. Design Rationale and Critical Analysis
@@ -784,11 +843,11 @@ Hexdump of an empty file with the following configuration:
 - Block size exponent: 62
 
 ```
-fedcba980100003e5d10700649933ab752097563
-d703b263a0e17a5e4824f77d2ff1000000000000
+fedcba980100003e5d105dfece87d497a9afa78c
+dc1461ce4fe539745f931a9db6b9000000000000
 0080af1349b9f5f9a1a6a0404dea36dcc9499bcb
-25c9adc112b7cc9a93cae41f3262b6b17928a5ac
-89997f71c2a558ba97988ac959e411b42a81
+25c9adc112b7cc9a93cae41f32622d4fd07c37b7
+257fe5617d81e7e8a3acb074f24a22f266ac
 ```
 
 Hexdump of a single block file with a single compressed zero byte with the following configuration:
@@ -801,15 +860,15 @@ Hexdump of a single block file with a single compressed zero byte with the follo
 - Block size exponent: 11
 
 ```
-fedcba980100011f5d1ef776ff58259da3edb40b
-dc53ceb8a7b4e2cf6ec95dc0e75b0b0000000000
-00402d3adedff11b61f14c886e35afa036736dcd
-87a74d27b5c1510225d0f592e213e82fafd5acdf
-4327b2bd4c3f26af861437d52dde78e034b00000
-41fef7ffffe000800001000000000000802d3ade
-dff11b61f14c886e35afa036736dcd87a74d27b5
-c1510225d0f592e213f2cf908ca3803a1f9f80b8
-2f1873c4581d5507446794e32e
+fedcba980100011f5d1e 594220ca22eda2e406c
+46d7fc3f07a2a974d5136eebdadfa0b000000000
+000402d3adedff11b61f14c886e35afa036736dc
+d87a74d27b5c1510225d0f592e213e82fafd5acd
+f4327b2bd4c3f26af861437d52dde78e034b0000
+041fef7ffffe000800001000000000000802d3ad
+edff11b61f14c886e35afa036736dcd87a74d27b
+5c1510225d0f592e213693139d8319b96f905900
+70ba721f06c27e8acea54d2af03
 ```
 
 ### A.2 Block Chaining Example
@@ -834,160 +893,250 @@ root = merge_tree(cv_0, cv_1, cv_2, root=true)
 The reference implementation provides a stack-only and efficient Reed-Solomon
 implementation written in Rust, which code is in the public domain.
 
-#### A.3.1 - Test vectors for RS(64,40)
+#### A.3.1 - Test vectors for RS(255,239)
 
 Test 1:
-Data:    00000000000000000000000000000000000000000000000000000000000000000000000000000000
-Parity:  000000000000000000000000000000000000000000000000
 
-Test 2:
-Data:    ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-Parity:  e81d42b0548bfb1c5e9d0475a75446c6bda44e0b8ea6e459
+```
+Data:    0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         00000000000000000000000000000000000000
 
-Test 3:
-Data:    000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627
-Parity:  9fb10923191a0659292e6e7c5ee8fbf0111329eb8bdaefe8
-
-#### A.3.2 - Test vectors for RS(34,10)
-
-Test 1:
-Data:    00000000000000000000
-Parity:  000000000000000000000000000000000000000000000000
-
-Test 2:
-Data:    ffffffffffffffffffff
-Parity:  a13722e7a3f27fe7702b64bdb2fad7bbb4eff74838d4c490
-
-Test 3:
-Data:    00010203040506070809
-Parity:  39e7d8f19efea4e2eadeb2547f7984bfa1949c9f75cddd90
-
-#### A.3.2 - Minimal Python Implementation
-
-Using Python 3, numpy and galois:
-
-```python
-import galois
-import numpy as np
-
-# Create the field with exact primitive polynomial x^8 + x^4 + x^3 + x^2 + 1
-GF = galois.GF(2**8, irreducible_poly=0x11d)
-
-# Verify primitive element is 2
-alpha = GF.primitive_element
-assert alpha == 2
-
-# Build generator polynomial for RS(64,40) - roots at α^1 through α^24
-g = galois.Poly([1], field=GF)
-x = galois.Poly([1, 0], field=GF)
-for i in range(1, 25):  # α^1 through α^24 (since 2t = 24)
-    g = g * (x - alpha**i)
-
-def rs_encode_64_40(data_bytes):
-    """
-    Encode 40-byte data with RS(64,40) protection.
-    
-    Parameters:
-    - Field: GF(2^8)
-    - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-    - Code: RS(64,40,12) - can correct up to 12 byte errors
-    - Generator: α = 2
-    
-    Args:
-        data_bytes: Exactly 40 bytes of data
-        
-    Returns:
-        64 bytes total: [40 bytes data || 24 bytes parity]
-    """
-    assert len(data_bytes) == 40, "Data must be exactly 40 bytes"
-    
-    # Convert bytes to galois field elements
-    data_list = list(data_bytes)
-    data_gf = GF(data_list)
-    
-    # Create polynomial from data (highest degree first for galois library)
-    data_poly = galois.Poly(data_gf[::-1], field=GF)
-    
-    # Shift by parity length (multiply by x^24)
-    shifted = data_poly * galois.Poly([1] + [0]*24, field=GF)
-    
-    # Compute remainder when divided by generator polynomial
-    _, remainder = divmod(shifted, g)
-    
-    # Extract parity coefficients (reverse to get lowest degree first)
-    parity_coeffs = remainder.coeffs[::-1] if remainder.degree >= 0 else []
-    parity = np.zeros(24, dtype=np.uint8)
-    parity[:len(parity_coeffs)] = [int(x) for x in parity_coeffs]
-    
-    return bytes(data_bytes) + bytes(parity)
-
-def rs_encode_34_10(data_bytes):
-    """
-    Encode 10-byte data with shortened RS(34,10) protection.
-    
-    This is a shortened version of RS(64,40) used for the file header.
-    
-    Parameters:
-    - Same field and generator as RS(64,40)
-    - Shortened to handle 10 bytes data + 24 bytes parity = 34 bytes total
-    - Still corrects up to 12 byte errors
-    
-    Args:
-        data_bytes: Exactly 10 bytes of data (file header payload)
-        
-    Returns:
-        34 bytes total: [10 bytes data || 24 bytes parity]
-    """
-    assert len(data_bytes) == 10, "Data must be exactly 10 bytes"
-    
-    # For shortened code, prepend (40-10)=30 zero bytes to make 40 bytes
-    padded_data = bytes(30) + data_bytes
-    
-    # Encode with full RS(64,40) code
-    full_codeword = rs_encode_64_40(padded_data)
-    
-    # Remove first (64-34)=30 bytes to get shortened codeword
-    return full_codeword[30:]
-
-def test_rs_implementations():
-    # Test RS(64,40) with test vectors
-    data1 = bytes.fromhex("00000000000000000000000000000000000000000000000000000000000000000000000000000000")
-    expected_parity1 = bytes.fromhex("000000000000000000000000000000000000000000000000")
-    codeword = rs_encode_64_40(data1)
-    assert codeword[40:] == expected_parity1
-
-    data2 = bytes.fromhex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
-    expected_parity2 = bytes.fromhex("e81d42b0548bfb1c5e9d0475a75446c6bda44e0b8ea6e459")
-    codeword = rs_encode_64_40(data2)
-    assert codeword[40:] == expected_parity2
-
-    data3 = bytes.fromhex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627")
-    expected_parity3 = bytes.fromhex("9fb10923191a0659292e6e7c5ee8fbf0111329eb8bdaefe8")
-    codeword = rs_encode_64_40(data3)
-    assert codeword[40:] == expected_parity3
-
-    # Test RS(34,10) with test vectors
-    data1 = bytes.fromhex("00000000000000000000")
-    expected_parity1 = bytes.fromhex("000000000000000000000000000000000000000000000000")
-    codeword = rs_encode_34_10(data1)
-    assert codeword[10:] == expected_parity1
-
-    data2 = bytes.fromhex("ffffffffffffffffffff")
-    expected_parity2 = bytes.fromhex("a13722e7a3f27fe7702b64bdb2fad7bbb4eff74838d4c490")
-    codeword = rs_encode_34_10(data2)
-    assert codeword[10:] == expected_parity2
-
-    data3 = bytes.fromhex("00010203040506070809")
-    expected_parity3 = bytes.fromhex("39e7d8f19efea4e2eadeb2547f7984bfa1949c9f75cddd90")
-    codeword = rs_encode_34_10(data3)
-    assert codeword[10:] == expected_parity3
-
-if __name__ == "__main__":
-    test_rs_implementations()
+Parity:  0000000000000000000000000000000000000000
+         00000000
 ```
 
-Note: Do NOT use galois.ReedSolomon(64, 40) as it expects primitive codes. The implementation above correctly handles
-the systematic encoding used in the Streaming-LZMA format.
+Test 2:
+
+```
+Data:    ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffff
+
+Parity:  ffffffffffffffffffffffffffffffff
+```
+
+Test 3:
+
+```
+Data:    000102030405060708090a0b0c0d0e0f10111213
+         1415161718191a1b1c1d1e1f2021222324252627
+         28292a2b2c2d2e2f303132333435363738393a3b
+         3c3d3e3f404142434445464748494a4b4c4d4e4f
+         505152535455565758595a5b5c5d5e5f60616263
+         6465666768696a6b6c6d6e6f7071727374757677
+         78797a7b7c7d7e7f808182838485868788898a8b
+         8c8d8e8f909192939495969798999a9b9c9d9e9f
+         a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3
+         b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7
+         c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb
+         dcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedee
+
+Parity:  b173d9afcc56f1636e325dc22984f527
+```
+
+#### A.3.2 - Test vectors for RS(255,223)
+
+Test 1:
+
+```
+Data:    0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         000000
+
+Parity:  0000000000000000000000000000000000000000
+         000000000000000000000000
+```
+
+Test 2:
+
+```
+Data:    ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffff
+
+Parity:  ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffff
+```
+
+Test 3:
+
+```
+Data:    000102030405060708090a0b0c0d0e0f10111213
+         1415161718191a1b1c1d1e1f2021222324252627
+         28292a2b2c2d2e2f303132333435363738393a3b
+         3c3d3e3f404142434445464748494a4b4c4d4e4f
+         505152535455565758595a5b5c5d5e5f60616263
+         6465666768696a6b6c6d6e6f7071727374757677
+         78797a7b7c7d7e7f808182838485868788898a8b
+         8c8d8e8f909192939495969798999a9b9c9d9e9f
+         a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3
+         b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7
+         c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb
+         dcddde
+
+Parity:  9c04c041d1ce5905b434daf6e5465f92d14ef9c2
+         e2016cc2bbf0773a018bc2aa
+```
+
+#### A.3.3 - Test vectors for RS(255,191)
+
+Test 1:
+
+```
+Data:    0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000
+
+Parity:  0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+         00000000
+```
+
+Test 2:
+
+```
+Data:    ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffff
+
+Parity:  ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+         ffffffff
+```
+
+Test 3:
+
+```
+Data:    000102030405060708090a0b0c0d0e0f10111213
+         1415161718191a1b1c1d1e1f2021222324252627
+         28292a2b2c2d2e2f303132333435363738393a3b
+         3c3d3e3f404142434445464748494a4b4c4d4e4f
+         505152535455565758595a5b5c5d5e5f60616263
+         6465666768696a6b6c6d6e6f7071727374757677
+         78797a7b7c7d7e7f808182838485868788898a8b
+         8c8d8e8f909192939495969798999a9b9c9d9e9f
+         a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3
+         b4b5b6b7b8b9babbbcbdbe
+
+Parity:  e8036c9c7298995a41a264a425fd1c9fe71e45f8
+         4f2dbbec9240caa1bbc44ae55529991460cb8bc3
+         2fbbb9e129bc6017f896f6a0a60677c657e04a54
+         dfb7c62a
+```
+
+#### A.3.4 - Test vectors for RS(64,40)
+
+Test 1:
+
+```
+Data:    0000000000000000000000000000000000000000
+         0000000000000000000000000000000000000000
+
+Parity:  0000000000000000000000000000000000000000
+         00000000
+```
+
+Test 2:
+
+```
+Data:    ffffffffffffffffffffffffffffffffffffffff
+         ffffffffffffffffffffffffffffffffffffffff
+
+Parity:  e81d42b0548bfb1c5e9d0475a75446c6bda44e0b
+         8ea6e459
+```
+
+Test 3:
+
+```
+Data:    000102030405060708090a0b0c0d0e0f10111213
+         1415161718191a1b1c1d1e1f2021222324252627
+
+Parity:  9fb10923191a0659292e6e7c5ee8fbf0111329eb
+         8bdaefe8
+```
+
+#### A.3.5 - Test vectors for RS(34,10)
+
+Test 1:
+
+```
+Data:    00000000000000000000
+
+Parity:  0000000000000000000000000000000000000000
+         00000000
+```
+
+Test 2:
+
+```
+Data:    ffffffffffffffffffff
+
+Parity:  a13722e7a3f27fe7702b64bdb2fad7bbb4eff748
+         38d4c490
+```
+
+Test 3:
+
+```
+Data:    00010203040506070809
+
+Parity:  1da26ab14dca41755fe7e961f1db5687428f0ee5
+         e6248048
+```
 
 ## Appendix B: Reference Implementation
 

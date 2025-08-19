@@ -1,8 +1,8 @@
 use super::{
     ByteWriter, Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
-    error_unsupported, lzma, reed_solomon,
+    error_unsupported, lzma,
+    reed_solomon::{code_34_10, code_64_40},
 };
-use crate::reed_solomon::decode_64_40;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SLZHeader {
@@ -37,16 +37,13 @@ impl SLZHeader {
         2u64.pow(self.block_size_exponent as u32)
     }
 
-    pub(crate) fn parse(
-        buffer: &[u8; reed_solomon::SHORTENED_CODEWORD_SIZE],
-        apply_rs_correction: bool,
-    ) -> crate::Result<SLZHeader> {
+    pub(crate) fn parse(buffer: &[u8; 34], apply_rs_correction: bool) -> crate::Result<SLZHeader> {
         let mut corrected_buffer = *buffer;
 
         if apply_rs_correction {
             let mut header_codeword = *buffer;
 
-            let corrected = reed_solomon::decode_34_10(&mut header_codeword)
+            let corrected = code_34_10::decode(&mut header_codeword)
                 .map_err(|_| error_invalid_data("header Reed-Solomon correction failed"))?;
 
             if corrected {
@@ -106,7 +103,7 @@ impl SLZHeader {
     }
 
     pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        let mut payload = [0u8; reed_solomon::SHORTENED_DATA_LEN];
+        let mut payload = [0u8; 10];
 
         payload[0..4].copy_from_slice(&SLZ_MAGIC);
 
@@ -120,7 +117,7 @@ impl SLZHeader {
         let lzma_props = u16::from_le_bytes([lzma_props_byte, self.dict_size_log2]);
         payload[8..10].copy_from_slice(&lzma_props.to_le_bytes());
 
-        let parity = reed_solomon::encode_34_10(&payload);
+        let parity = code_34_10::encode(&payload);
 
         writer.write_all(&payload)?;
         writer.write_all(&parity)?;
@@ -150,7 +147,7 @@ impl SLZBlockHeader {
         let mut payload = [0u8; 40];
         payload[..8].copy_from_slice(&physical_size_with_flags.to_le_bytes());
         payload[8..].copy_from_slice(&blake3_hash);
-        let rs_parity = reed_solomon::encode(&payload);
+        let rs_parity = code_64_40::encode(&payload);
         Self {
             physical_size_with_flags,
             blake3_hash,
@@ -159,7 +156,7 @@ impl SLZBlockHeader {
     }
 
     pub(crate) fn parse(
-        buffer: &[u8; reed_solomon::CODEWORD_SIZE],
+        buffer: &[u8; 64],
         apply_rs_correction: bool,
     ) -> crate::Result<SLZBlockHeader> {
         let mut corrected_buffer = *buffer;
@@ -168,7 +165,7 @@ impl SLZBlockHeader {
             let mut codeword = [0u8; 64];
             codeword.copy_from_slice(buffer);
 
-            match decode_64_40(&mut codeword) {
+            match code_64_40::decode(&mut codeword) {
                 Ok(corrected) => {
                     if corrected {
                         eprintln!("block header errors detected and corrected by Reed-Solomon");

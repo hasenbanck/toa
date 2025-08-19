@@ -332,18 +332,18 @@ mod tests {
     #[test]
     fn test_slz_writer_empty() {
         let expected_compressed: [u8; 98] = hex!(
-            "fedcba980100003e5d10700649933ab752097563
-             d703b263a0e17a5e4824f77d2ff1000000000000
+            "fedcba980100003e5d105dfece87d497a9afa78c
+             dc1461ce4fe539745f931a9db6b9000000000000
              0080af1349b9f5f9a1a6a0404dea36dcc9499bcb
-             25c9adc112b7cc9a93cae41f3262b6b17928a5ac
-             89997f71c2a558ba97988ac959e411b42a81"
+             25c9adc112b7cc9a93cae41f32622d4fd07c37b7
+             257fe5617d81e7e8a3acb074f24a22f266ac"
         );
         let expected_header_rs_parity: [u8; 24] =
-            hex!("700649933ab752097563d703b263a0e17a5e4824f77d2ff1");
+            hex!("5dfece87d497a9afa78cdc1461ce4fe539745f931a9db6b9");
         let expected_trailer_blake_hash: [u8; 32] =
             hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
         let expected_trailer_rs_parity: [u8; 24] =
-            hex!("b6b17928a5ac89997f71c2a558ba97988ac959e411b42a81");
+            hex!("2d4fd07c37b7257fe5617d81e7e8a3acb074f24a22f266ac");
 
         let mut buffer = Vec::new();
 
@@ -416,22 +416,22 @@ mod tests {
     #[test]
     fn test_slz_writer_zero_byte() {
         let expected_compressed: [u8; 173] = hex!(
-            "fedcba980100011f5d1ef776ff58259da3edb40b
-             dc53ceb8a7b4e2cf6ec95dc0e75b0b0000000000
-             00402d3adedff11b61f14c886e35afa036736dcd
-             87a74d27b5c1510225d0f592e213e82fafd5acdf
-             4327b2bd4c3f26af861437d52dde78e034b00000
-             41fef7ffffe000800001000000000000802d3ade
-             dff11b61f14c886e35afa036736dcd87a74d27b5
-             c1510225d0f592e213f2cf908ca3803a1f9f80b8
-             2f1873c4581d5507446794e32e"
+            "fedcba980100011f5d1e 594220ca22eda2e406c
+             46d7fc3f07a2a974d5136eebdadfa0b000000000
+             000402d3adedff11b61f14c886e35afa036736dc
+             d87a74d27b5c1510225d0f592e213e82fafd5acd
+             f4327b2bd4c3f26af861437d52dde78e034b0000
+             041fef7ffffe000800001000000000000802d3ad
+             edff11b61f14c886e35afa036736dcd87a74d27b
+             5c1510225d0f592e213693139d8319b96f905900
+             70ba721f06c27e8acea54d2af03"
         );
         let expected_header_rs_parity: [u8; 24] =
-            hex!("f776ff58259da3edb40bdc53ceb8a7b4e2cf6ec95dc0e75b");
+            hex!("594220ca22eda2e406c46d7fc3f07a2a974d5136eebdadfa");
         let expected_trailer_blake_hash: [u8; 32] =
             hex!("2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213");
         let expected_trailer_rs_parity: [u8; 24] =
-            hex!("f2cf908ca3803a1f9f80b82f1873c4581d5507446794e32e");
+            hex!("693139d8319b96f90590070ba721f06c27e8acea54d2af03");
 
         let mut buffer = Vec::new();
 
