@@ -1,8 +1,9 @@
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::{
-    ByteReader, Prefilter, SLZ_MAGIC, SLZ_VERSION, error_invalid_data, error_unsupported,
-    reed_solomon::code_64_40,
+    Prefilter,
+    header::{SLZBlockHeader, SLZHeader},
+    trailer::SLZFileTrailer,
 };
 
 /// Metadata information from an SLZ file.
@@ -29,7 +30,7 @@ pub struct SLZMetadata {
     /// Blake3 hash of the uncompressed data
     pub blake3_hash: [u8; 32],
     /// Reed-Solomon parity data for hash protection
-    pub rs_parity: [u8; 32],
+    pub rs_parity: [u8; 24],
     /// `True` if the hash could be validated
     pub validated: bool,
     /// `True` if the hash was corrupt but could be validated.
@@ -48,123 +49,68 @@ impl SLZMetadata {
 
         reader.seek(SeekFrom::Start(0))?;
 
-        let mut magic = [0u8; 4];
-        reader.read_exact(&mut magic)?;
-        if magic != SLZ_MAGIC {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_invalid_data("invalid SLZ magic bytes"));
-        }
+        let mut header_buffer = [0u8; 34];
+        reader.read_exact(&mut header_buffer)?;
 
-        let version = reader.read_u8()?;
-        if version != SLZ_VERSION {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_unsupported("unsupported SLZ version"));
-        }
-
-        let prefilter_byte = reader.read_u8()?;
-        let prefilter = match Prefilter::try_from(prefilter_byte) {
-            Ok(prefilter) => prefilter,
-            Err(_) => {
-                reader.seek(SeekFrom::Start(original_pos))?;
-                return Err(error_invalid_data("unsupported prefilter type"));
-            }
-        };
-
-        let block_size_exponent = reader.read_u8()?;
-        if !(16u8..=62u8).contains(&block_size_exponent) {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_invalid_data("invalid block size"));
-        }
-        let block_size = 2u64.pow(block_size_exponent as u32);
-
-        let props = reader.read_u8()?;
-        let lc = props % 9;
-        let temp = props / 9;
-        let lp = temp % 5;
-        let pb = temp / 5;
-
-        if lc > 8 || lp > 4 || pb > 4 {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_invalid_data("invalid LZMA properties"));
-        }
-
-        let dict_size_log2 = reader.read_u8()?;
-        if !(16u8..=31u8).contains(&dict_size_log2) {
-            reader.seek(SeekFrom::Start(original_pos))?;
-            return Err(error_invalid_data("invalid dictionary size"));
-        }
-        let dict_size = 2u32.pow(dict_size_log2 as u32);
+        let header = SLZHeader::parse(&header_buffer, true)?;
 
         let mut compressed_size = 0u64;
 
         let mut block_count = 0u64;
+
+        // Parse blocks until we find the final trailer.
         loop {
-            let size_with_flag = reader.read_u64()?;
-            let is_partial_block = (size_with_flag as i64) < 0;
-            let block_size = if is_partial_block {
-                (-(size_with_flag as i64)) as u64
-            } else {
-                size_with_flag
-            };
+            let mut buffer = [0u8; 64];
+            reader.read_exact(&mut buffer)?;
 
-            if block_size == 0 {
-                // End-of-blocks marker found
-                break;
-            }
-            compressed_size += block_size;
-            block_count += 1;
+            let size_with_flags = u64::from_le_bytes([
+                buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6],
+                buffer[7],
+            ]);
 
-            // Skip the compressed data and the 64-byte block trailer
-            reader.seek(SeekFrom::Current(block_size as i64 + 64))?;
-        }
+            // Check bit 63 (MSB) to determine if this is a block header or final trailer.
+            if (size_with_flags & (1u64 << 63)) != 0 {
+                let trailer_result = SLZFileTrailer::parse(&buffer, true);
+                let (trailer, validated, corrected) = match trailer_result {
+                    Ok(trailer) => (trailer, true, false),
+                    Err(_) => {
+                        // Try parsing without Reed-Solomon correction.
+                        match SLZFileTrailer::parse(&buffer, false) {
+                            Ok(trailer) => (trailer, false, false),
+                            Err(e) => {
+                                reader.seek(SeekFrom::Start(original_pos))?;
+                                return Err(e);
+                            }
+                        }
+                    }
+                };
 
-        // 72 bytes for trailer
-        reader.seek(SeekFrom::End(-72))?;
-
-        let uncompressed_size = reader.read_u64()?;
-
-        let mut blake3_hash = [0u8; 32];
-        reader.read_exact(&mut blake3_hash)?;
-
-        let mut rs_parity = [0u8; 32];
-        reader.read_exact(&mut rs_parity)?;
-
-        let mut codeword = [0u8; 64];
-        codeword[..32].copy_from_slice(&blake3_hash);
-        codeword[32..].copy_from_slice(&rs_parity);
-
-        let mut validated = true;
-        let mut corrected = false;
-
-        match code_64_40::decode(&mut codeword) {
-            Ok(was_corrected) => {
-                if was_corrected {
-                    blake3_hash.copy_from_slice(&codeword[..32]);
-                    corrected = true;
-                }
-            }
-            Err(_) => {
                 reader.seek(SeekFrom::Start(original_pos))?;
-                validated = false;
+
+                return Ok(SLZMetadata {
+                    prefilter: header.prefilter(),
+                    block_size: header.block_size(),
+                    lc: header.lc(),
+                    lp: header.lp(),
+                    pb: header.pb(),
+                    dict_size: header.dict_size(),
+                    block_count,
+                    uncompressed_size: trailer.total_uncompressed_size(),
+                    compressed_size,
+                    blake3_hash: trailer.blake3_hash(),
+                    rs_parity: trailer.rs_parity(),
+                    validated,
+                    corrected,
+                });
+            } else {
+                let block_header = SLZBlockHeader::parse(&buffer, true)?;
+                let physical_size = block_header.physical_size();
+
+                compressed_size += physical_size;
+                block_count += 1;
+
+                reader.seek(SeekFrom::Current(physical_size as i64))?;
             }
         }
-
-        reader.seek(SeekFrom::Start(original_pos))?;
-
-        Ok(SLZMetadata {
-            prefilter,
-            block_size,
-            lc,
-            lp,
-            pb,
-            dict_size,
-            block_count,
-            uncompressed_size,
-            compressed_size,
-            blake3_hash,
-            rs_parity,
-            validated,
-            corrected,
-        })
     }
 }

@@ -3,12 +3,13 @@ use super::{ByteWriter, Write, error_invalid_data, reed_solomon::code_64_40};
 /// File trailer containing total uncompressed size, root hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
 pub struct SLZFileTrailer {
-    pub total_uncompressed_size_with_flags: u64,
-    pub blake3_hash: [u8; 32],
-    pub rs_parity: [u8; 24],
+    total_uncompressed_size_with_flags: u64,
+    blake3_hash: [u8; 32],
+    rs_parity: [u8; 24],
 }
 
 impl SLZFileTrailer {
+    /// Create a new file trailer.
     pub fn new(total_uncompressed_size: u64, blake3_hash: [u8; 32]) -> Self {
         let total_uncompressed_size_with_flags = total_uncompressed_size | (1u64 << 63);
 
@@ -23,11 +24,22 @@ impl SLZFileTrailer {
         }
     }
 
+    /// Get the Blake3 hash.
+    pub fn blake3_hash(&self) -> [u8; 32] {
+        self.blake3_hash
+    }
+
+    /// Get the Reed-Solomon parity data.
+    pub fn rs_parity(&self) -> [u8; 24] {
+        self.rs_parity
+    }
+
     /// Get the total uncompressed size without flag bits.
     pub fn total_uncompressed_size(&self) -> u64 {
         self.total_uncompressed_size_with_flags & !(1u64 << 63)
     }
 
+    /// Parse a file trailer from a buffer.
     pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<SLZFileTrailer> {
         let mut corrected_buffer = *buffer;
 
@@ -74,6 +86,7 @@ impl SLZFileTrailer {
         })
     }
 
+    /// Write the trailer to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         writer.write_u64(self.total_uncompressed_size_with_flags)?;
         writer.write_all(&self.blake3_hash)?;

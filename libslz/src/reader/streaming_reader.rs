@@ -84,7 +84,7 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                 let trailer = SLZFileTrailer::parse(&header_data, self.validate_rs)?;
                 let computed_root_hash = self.compute_root_hash()?;
 
-                if computed_root_hash != trailer.blake3_hash {
+                if computed_root_hash != trailer.blake3_hash() {
                     return Err(error_invalid_data("blake3 hash mismatch"));
                 }
 
@@ -118,15 +118,15 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                 self.current_block_physical_size = physical_size;
 
                 // Store the block header hash for later verification.
-                self.current_block_expected_hash = Some(block_header.blake3_hash);
+                self.current_block_expected_hash = Some(block_header.blake3_hash());
 
                 // Create the reader chain.
                 let reader = Reader::new(
                     inner,
-                    header.prefilter,
-                    header.lc,
-                    header.lp,
-                    header.pb,
+                    header.prefilter(),
+                    header.lc(),
+                    header.lp(),
+                    header.pb(),
                     header.dict_size(),
                 )?;
 

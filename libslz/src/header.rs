@@ -4,21 +4,23 @@ use super::{
     reed_solomon::{code_34_10, code_64_40},
 };
 
+/// SLZ file header containing format metadata and compression parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct SLZHeader {
-    pub capabilities: u8,
-    pub prefilter: Prefilter,
-    pub block_size_exponent: u8,
-    pub lc: u8,
-    pub lp: u8,
-    pub pb: u8,
-    pub dict_size_log2: u8,
+    capabilities: u8,
+    prefilter: Prefilter,
+    block_size_exponent: u8,
+    lc: u8,
+    lp: u8,
+    pb: u8,
+    dict_size_log2: u8,
 }
 
 impl SLZHeader {
+    /// Create a new SLZ header from options.
     pub fn from_options(options: &SLZOptions) -> Self {
         Self {
-            capabilities: 0x00, // Currently set to 0x00 per specification
+            capabilities: 0x00,
             prefilter: options.prefilter,
             block_size_exponent: options.block_size_exponent.unwrap_or(62),
             lc: options.lc,
@@ -28,15 +30,43 @@ impl SLZHeader {
         }
     }
 
+    /// Get the capabilities field.
+    pub fn capabilities(&self) -> u8 {
+        self.capabilities
+    }
+
+    /// Get the prefilter used.
+    pub fn prefilter(&self) -> Prefilter {
+        self.prefilter
+    }
+
+    /// Get the LZMA literal context bits.
+    pub fn lc(&self) -> u8 {
+        self.lc
+    }
+
+    /// Get the LZMA literal position bits.
+    pub fn lp(&self) -> u8 {
+        self.lp
+    }
+
+    /// Get the LZMA position bits.
+    pub fn pb(&self) -> u8 {
+        self.pb
+    }
+
+    /// Get the actual dictionary size.
     pub fn dict_size(&self) -> u32 {
         2u32.pow(self.dict_size_log2 as u32)
             .min(lzma::DICT_SIZE_MAX)
     }
 
+    /// Get the actual block size.
     pub fn block_size(&self) -> u64 {
         2u64.pow(self.block_size_exponent as u32)
     }
 
+    /// Parse an SLZ header from a buffer.
     pub fn parse(buffer: &[u8; 34], apply_rs_correction: bool) -> crate::Result<SLZHeader> {
         let mut corrected_buffer = *buffer;
 
@@ -102,6 +132,7 @@ impl SLZHeader {
         })
     }
 
+    /// Write the header to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         let mut payload = [0u8; 10];
 
@@ -126,11 +157,12 @@ impl SLZHeader {
     }
 }
 
+/// SLZ block header containing size information, hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
 pub struct SLZBlockHeader {
-    pub physical_size_with_flags: u64,
-    pub blake3_hash: [u8; 32],
-    pub rs_parity: [u8; 24],
+    physical_size_with_flags: u64,
+    blake3_hash: [u8; 32],
+    rs_parity: [u8; 24],
 }
 
 impl SLZBlockHeader {
@@ -155,6 +187,7 @@ impl SLZBlockHeader {
         }
     }
 
+    /// Parse a block header from a buffer.
     pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<SLZBlockHeader> {
         let mut corrected_buffer = *buffer;
 
@@ -201,6 +234,16 @@ impl SLZBlockHeader {
         })
     }
 
+    /// Get the Blake3 hash.
+    pub fn blake3_hash(&self) -> [u8; 32] {
+        self.blake3_hash
+    }
+
+    /// Get the Reed-Solomon parity data.
+    pub fn rs_parity(&self) -> [u8; 24] {
+        self.rs_parity
+    }
+
     /// Get the physical block size without flag bits.
     pub fn physical_size(&self) -> u64 {
         self.physical_size_with_flags & !(0b11u64 << 62)
@@ -211,6 +254,7 @@ impl SLZBlockHeader {
         (self.physical_size_with_flags & (1u64 << 62)) != 0
     }
 
+    /// Write the block header to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         writer.write_u64(self.physical_size_with_flags)?;
         writer.write_all(&self.blake3_hash)?;

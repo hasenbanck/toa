@@ -144,30 +144,8 @@ impl TryFrom<u8> for Prefilter {
     }
 }
 
-trait ByteReader {
-    fn read_u8(&mut self) -> Result<u8>;
-
-    fn read_u64(&mut self) -> Result<u64>;
-}
-
 trait ByteWriter {
     fn write_u64(&mut self, value: u64) -> Result<()>;
-}
-
-impl<T: Read> ByteReader for T {
-    #[inline(always)]
-    fn read_u8(&mut self) -> Result<u8> {
-        let mut buf = [0; 1];
-        self.read_exact(&mut buf)?;
-        Ok(buf[0])
-    }
-
-    #[inline(always)]
-    fn read_u64(&mut self) -> Result<u64> {
-        let mut buf = [0; 8];
-        self.read_exact(buf.as_mut())?;
-        Ok(u64::from_le_bytes(buf))
-    }
 }
 
 impl<T: Write> ByteWriter for T {
