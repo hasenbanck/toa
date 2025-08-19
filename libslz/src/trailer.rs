@@ -1,4 +1,4 @@
-use super::{ByteWriter, Write, error_invalid_data, reed_solomon::code_64_40};
+use super::{Write, error_invalid_data, reed_solomon::code_64_40};
 
 /// File trailer containing total uncompressed size, root hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
@@ -88,9 +88,12 @@ impl SLZFileTrailer {
 
     /// Write the trailer to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        writer.write_u64(self.total_uncompressed_size_with_flags)?;
-        writer.write_all(&self.blake3_hash)?;
-        writer.write_all(&self.rs_parity)
+        let mut trailer_bytes = [0u8; 64];
+        trailer_bytes[0..8].copy_from_slice(&self.total_uncompressed_size_with_flags.to_le_bytes());
+        trailer_bytes[8..40].copy_from_slice(&self.blake3_hash);
+        trailer_bytes[40..64].copy_from_slice(&self.rs_parity);
+
+        writer.write_all(&trailer_bytes)
     }
 }
 

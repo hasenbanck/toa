@@ -144,17 +144,6 @@ impl TryFrom<u8> for Prefilter {
     }
 }
 
-trait ByteWriter {
-    fn write_u64(&mut self, value: u64) -> Result<()>;
-}
-
-impl<T: Write> ByteWriter for T {
-    #[inline(always)]
-    fn write_u64(&mut self, value: u64) -> Result<()> {
-        self.write_all(&value.to_le_bytes())
-    }
-}
-
 #[cfg(feature = "std")]
 #[inline(always)]
 fn error_eof() -> Error {

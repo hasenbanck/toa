@@ -1,6 +1,6 @@
 use super::{
-    ByteWriter, Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
-    error_unsupported, lzma,
+    Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data, error_unsupported,
+    lzma,
     reed_solomon::{code_34_10, code_64_40},
 };
 
@@ -134,26 +134,25 @@ impl SLZHeader {
 
     /// Write the header to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        let mut payload = [0u8; 10];
+        let mut data_bytes = [0u8; 10];
 
-        payload[0..4].copy_from_slice(&SLZ_MAGIC);
-
-        payload[4] = SLZ_VERSION;
-        payload[5] = self.capabilities;
-
-        payload[6] = u8::from(self.prefilter);
-        payload[7] = self.block_size_exponent;
+        data_bytes[0..4].copy_from_slice(&SLZ_MAGIC);
+        data_bytes[4] = SLZ_VERSION;
+        data_bytes[5] = self.capabilities;
+        data_bytes[6] = u8::from(self.prefilter);
+        data_bytes[7] = self.block_size_exponent;
 
         let lzma_props_byte = (self.pb * 5 + self.lp) * 9 + self.lc;
         let lzma_props = u16::from_le_bytes([lzma_props_byte, self.dict_size_log2]);
-        payload[8..10].copy_from_slice(&lzma_props.to_le_bytes());
+        data_bytes[8..10].copy_from_slice(&lzma_props.to_le_bytes());
 
-        let parity = code_34_10::encode(&payload);
+        let parity_bytes = code_34_10::encode(&data_bytes);
 
-        writer.write_all(&payload)?;
-        writer.write_all(&parity)?;
+        let mut header_bytes = [0; 34];
+        header_bytes[..10].copy_from_slice(&data_bytes);
+        header_bytes[10..].copy_from_slice(&parity_bytes);
 
-        Ok(())
+        writer.write_all(&header_bytes)
     }
 }
 
@@ -256,8 +255,11 @@ impl SLZBlockHeader {
 
     /// Write the block header to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
-        writer.write_u64(self.physical_size_with_flags)?;
-        writer.write_all(&self.blake3_hash)?;
-        writer.write_all(&self.rs_parity)
+        let mut header_bytes = [0u8; 64];
+        header_bytes[0..8].copy_from_slice(&self.physical_size_with_flags.to_le_bytes());
+        header_bytes[8..40].copy_from_slice(&self.blake3_hash);
+        header_bytes[40..64].copy_from_slice(&self.rs_parity);
+
+        writer.write_all(&header_bytes)
     }
 }
