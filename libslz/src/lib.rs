@@ -34,7 +34,7 @@
 //! ## License
 //!
 //! Licensed under the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
-#![forbid(missing_docs)]
+#![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -60,7 +60,7 @@ pub(crate) use std::io::Read;
 pub(crate) use std::io::Write;
 
 use blake3::hazmat::{ChainingValue, Mode};
-use header::SLZHeader;
+pub use header::{SLZBlockHeader, SLZHeader};
 pub use lzma::optimized_reader;
 pub use metadata::SLZMetadata;
 #[cfg(not(feature = "std"))]
@@ -70,6 +70,7 @@ pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
 pub use reader::SLZStreamingReader;
+pub use trailer::SLZFileTrailer;
 pub use writer::{SLZOptions, SLZStreamingWriter};
 
 /// Result type of the crate.

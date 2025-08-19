@@ -5,18 +5,18 @@ use super::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SLZHeader {
-    pub(crate) capabilities: u8,
-    pub(crate) prefilter: Prefilter,
-    pub(crate) block_size_exponent: u8,
-    pub(crate) lc: u8,
-    pub(crate) lp: u8,
-    pub(crate) pb: u8,
-    pub(crate) dict_size_log2: u8,
+pub struct SLZHeader {
+    pub capabilities: u8,
+    pub prefilter: Prefilter,
+    pub block_size_exponent: u8,
+    pub lc: u8,
+    pub lp: u8,
+    pub pb: u8,
+    pub dict_size_log2: u8,
 }
 
 impl SLZHeader {
-    pub(crate) fn from_options(options: &SLZOptions) -> Self {
+    pub fn from_options(options: &SLZOptions) -> Self {
         Self {
             capabilities: 0x00, // Currently set to 0x00 per specification
             prefilter: options.prefilter,
@@ -28,16 +28,16 @@ impl SLZHeader {
         }
     }
 
-    pub(crate) fn dict_size(&self) -> u32 {
+    pub fn dict_size(&self) -> u32 {
         2u32.pow(self.dict_size_log2 as u32)
             .min(lzma::DICT_SIZE_MAX)
     }
 
-    pub(crate) fn block_size(&self) -> u64 {
+    pub fn block_size(&self) -> u64 {
         2u64.pow(self.block_size_exponent as u32)
     }
 
-    pub(crate) fn parse(buffer: &[u8; 34], apply_rs_correction: bool) -> crate::Result<SLZHeader> {
+    pub fn parse(buffer: &[u8; 34], apply_rs_correction: bool) -> crate::Result<SLZHeader> {
         let mut corrected_buffer = *buffer;
 
         if apply_rs_correction {
@@ -102,7 +102,7 @@ impl SLZHeader {
         })
     }
 
-    pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+    pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         let mut payload = [0u8; 10];
 
         payload[0..4].copy_from_slice(&SLZ_MAGIC);
@@ -127,15 +127,15 @@ impl SLZHeader {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SLZBlockHeader {
-    pub(crate) physical_size_with_flags: u64,
-    pub(crate) blake3_hash: [u8; 32],
-    pub(crate) rs_parity: [u8; 24],
+pub struct SLZBlockHeader {
+    pub physical_size_with_flags: u64,
+    pub blake3_hash: [u8; 32],
+    pub rs_parity: [u8; 24],
 }
 
 impl SLZBlockHeader {
     /// Create a block header with appropriate MSB flags.
-    pub(crate) fn new(physical_size: u64, is_partial: bool, blake3_hash: [u8; 32]) -> Self {
+    pub fn new(physical_size: u64, is_partial: bool, blake3_hash: [u8; 32]) -> Self {
         // Clear top 2 bits
         let mut physical_size_with_flags = physical_size & !(0b11u64 << 62);
 
@@ -155,10 +155,7 @@ impl SLZBlockHeader {
         }
     }
 
-    pub(crate) fn parse(
-        buffer: &[u8; 64],
-        apply_rs_correction: bool,
-    ) -> crate::Result<SLZBlockHeader> {
+    pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<SLZBlockHeader> {
         let mut corrected_buffer = *buffer;
 
         if apply_rs_correction {
@@ -205,16 +202,16 @@ impl SLZBlockHeader {
     }
 
     /// Get the physical block size without flag bits.
-    pub(crate) fn physical_size(&self) -> u64 {
+    pub fn physical_size(&self) -> u64 {
         self.physical_size_with_flags & !(0b11u64 << 62)
     }
 
     /// Check if this is a partial block (only allowed as the final block).
-    pub(crate) fn is_partial_block(&self) -> bool {
+    pub fn is_partial_block(&self) -> bool {
         (self.physical_size_with_flags & (1u64 << 62)) != 0
     }
 
-    pub(crate) fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+    pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         writer.write_u64(self.physical_size_with_flags)?;
         writer.write_all(&self.blake3_hash)?;
         writer.write_all(&self.rs_parity)
