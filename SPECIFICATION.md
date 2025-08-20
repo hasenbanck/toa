@@ -42,6 +42,39 @@ The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SH
 
 Byte values are shown in hexadecimal notation (e.g., 0xFE). Multibyte sequences are shown with the first byte leftmost.
 
+### 1.4 Key Concepts
+
+This section introduces terminology used throughout the specification.
+
+**Chunks and Blocks**: Input data is divided into *chunks* of up to `block_size` bytes (configured in the header). Each
+chunk is further divided into *blocks* of 64 bytes for LZMA compression. Only the last chunk may be smaller than
+`block_size` (a *partial chunk*).
+
+**Chaining Values**: Each chunk and parent node produces a 32-byte BLAKE3 *chaining value* (CV) that represents its
+content cryptographically. These CVs form a binary tree structure, with the root CV becoming the file's hash.
+
+**Physical vs Uncompressed Size**: The *physical block size* is the actual number of bytes stored (including any
+Reed-Solomon overhead if enabled). The *uncompressed size* is the original data size before compression.
+
+**Full vs Partial Blocks**: *Full blocks* have an uncompressed size exactly equal to the configured block size. Only the
+last block in a file may be *partial* (smaller than block size). This distinction is critical for maintaining the BLAKE3
+tree structure.
+
+**Root Hash**: The final BLAKE3 hash of the entire file, computed by merging all chunk chaining values according to the
+tree structure. For single-chunk files, the chunk's CV is the root hash.
+
+**Reed-Solomon Protection**: An error correction mechanism applied at three levels:
+
+- **Header protection**: RS(34,10) protecting the 10-byte header
+- **Block metadata protection**: RS(64,40) protecting each 40-byte block header
+- **Data protection** (optional): RS codes protecting compressed data within blocks
+
+**MSB Flags**: The most significant bits of the size field distinguish between block headers (MSB=0) and the final
+trailer (MSB=1), enabling simple streaming parsing without special markers.
+
+**Tree Structure**: Chunks are organized as leaves of a binary tree where left subtrees are complete binary trees with
+power-of-2 chunks. This structure enables parallel processing and efficient append operations.
+
 ## 2. File Structure
 
 A Streaming-LZMA file consists of three sections:
@@ -95,69 +128,15 @@ Decoders MUST reject files with unsupported version numbers.
 One byte indicating optional features:
 
 - **Bits 0-1**: Reed-Solomon data protection level
-    - `0b00`: None (Only the metadata is protected)
-    - `0b01`: Light - RS(255,239), 6.3% overhead, corrects up to 8 bytes per 255
-    - `0b10`: Standard - RS(255,223), 12.5% overhead, corrects 16 up to bytes per 255
-    - `0b11`: Heavy - RS(255,191), 25% overhead, corrects up to 32 bytes per 255
+    - `0b00`: None (Only metadata is protected)
+    - `0b01`: Light - RS(255,239), 6.3% overhead
+    - `0b10`: Standard - RS(255,223), 12.5% overhead
+    - `0b11`: Heavy - RS(255,191), 25% overhead
 - **Bits 2-7**: Reserved (must be 0)
 
-When Reed-Solomon data protection is enabled (bits 0-1 ≠ 0b00), compressed block data is encoded as consecutive
-Reed-Solomon codewords. The first byte of the first codeword contains the padding size, indicating how many zero padding
-bytes were added at the end of the last codeword's data section.
-
-**Reed-Solomon Parameters**:
-
-All data protection levels use the same field parameters as the metadata protection:
-
-- Field: GF(2^8)
-- Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-- Generator: α = 2
-
-**Reed-Solomon Protected Data Structure**:
-
-```
-+--------------------------------+
-| RS Codeword 0                  |
-|   Padding size (1 byte)        |  Number of padding bytes in last codeword
-|   Data (≤ data_len-1 bytes)    |  First part of compressed data
-|   Parity (parity_len bytes)    |  RS parity bytes
-+--------------------------------+
-| RS Codeword 1                  |
-|   Data (data_len bytes)        |  Continuation of compressed data
-|   Parity (parity_len bytes)    |  RS parity bytes
-+--------------------------------+
-|             ...                |
-+--------------------------------+
-| RS Codeword N                  |
-|   Data (data_len bytes)        |  Last part of compressed data + zero padding
-|   Parity (parity_len bytes)    |  RS parity bytes
-+--------------------------------+
-```
-
-Where `data_len` and `parity_len` depend on the protection level:
-
-- Light: data_len = 239, parity_len = 16
-- Standard: data_len = 223, parity_len = 32
-- Heavy: data_len = 191, parity_len = 64
-
-**Calculating Actual Compressed Size**:
-
-Given the physical block size from the block header and the padding size from the first codeword:
-
-```
-num_codewords = physical_block_size / 255
-total_data_capacity = (num_codewords * data_len) - 1  // -1 for padding size byte
-actual_compressed_size = total_data_capacity - padding_size
-```
-
-**Example**: For RS(255,223) protection with a physical block size of 1020 bytes:
-
-- Number of codewords: 1020 / 255 = 4
-- Total data capacity: (4 × 223) - 1 = 891 bytes
-- If padding_size = 5: actual compressed size = 891 - 5 = 886 bytes
-
-This design maintains the streaming-friendly property of the format, as the decoder can process the first codeword, read
-the padding size, and then correctly extract the exact amount of compressed data while discarding padding bytes.
+When data protection is enabled (bits 0-1 ≠ 0b00), compressed block
+data is encoded with Reed-Solomon protection. See Section 4.3 for
+detailed structure and implementation.
 
 ### 3.4 Prefilter Selection
 
@@ -356,6 +335,98 @@ The choice of block size directly impacts compression ratio:
 - Block size should be ≥ dictionary size for efficient compression
 - Recommended block sizes: 1 MiB to 512 MiB depending on use case (must be power of 2)
 - Consider memory usage: parallel decompression requires approximately (dict_size + block_size) × thread_count
+
+### 4.3 Reed-Solomon Data Protection
+
+When Reed-Solomon data protection is enabled (capabilities bits 0-1 ≠ 0b00), compressed block data is encoded as
+consecutive Reed-Solomon codewords. This provides error correction capability for the compressed data itself, in
+addition to the metadata protection.
+
+#### 4.3.1 Protection Levels
+
+The capabilities field (Section 3.3) defines three levels of data protection:
+
+- **Light** - RS(255,239): 6.3% overhead, corrects up to 8 bytes per 255
+- **Standard** - RS(255,223): 12.5% overhead, corrects up to 16 bytes per 255
+- **Heavy** - RS(255,191): 25% overhead, corrects up to 32 bytes per 255
+
+All protection levels use the same field parameters as the metadata protection:
+
+- Field: GF(2^8)
+- Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
+- Generator: α = 2
+
+#### 4.3.2 Protected Data Structure
+
+The compressed data is organized into Reed-Solomon codewords. The first byte of the first codeword contains the padding
+size, indicating how many zero padding bytes were added at the end of the last codeword's data section:
+
+```
++--------------------------------+
+| RS Codeword 0                  |
+|   Padding size (1 byte)        |  Number of padding bytes in last codeword
+|   Data (≤ data_len-1 bytes)    |  First part of compressed data
+|   Parity (parity_len bytes)    |  RS parity bytes
++--------------------------------+
+| RS Codeword 1                  |
+|   Data (data_len bytes)        |  Continuation of compressed data
+|   Parity (parity_len bytes)    |  RS parity bytes
++--------------------------------+
+|             ...                |
++--------------------------------+
+| RS Codeword N                  |
+|   Data (data_len bytes)        |  Last part of compressed data + zero padding
+|   Parity (parity_len bytes)    |  RS parity bytes
++--------------------------------+
+```
+
+Where `data_len` and `parity_len` depend on the protection level:
+
+- **Light**: data_len = 239, parity_len = 16
+- **Standard**: data_len = 223, parity_len = 32
+- **Heavy**: data_len = 191, parity_len = 64
+
+#### 4.3.3 Calculating Actual Compressed Size
+
+The physical block size in the block header includes all Reed-Solomon overhead. To determine the actual compressed data
+size:
+
+```
+num_codewords = physical_block_size / 255
+total_data_capacity = (num_codewords * data_len) - 1  // -1 for padding size byte
+actual_compressed_size = total_data_capacity - padding_size
+```
+
+**Example**: For RS(255,223) protection with a physical block size of 1020 bytes:
+
+- Number of codewords: 1020 / 255 = 4
+- Total data capacity: (4 × 223) - 1 = 891 bytes
+- If padding_size = 5: actual compressed size = 891 - 5 = 886 bytes
+
+#### 4.3.4 Implementation Notes
+
+This design maintains the streaming-friendly property of the format:
+
+1. The decoder reads the first codeword and extracts the padding size
+2. It processes all codewords sequentially, applying RS correction as needed
+3. It correctly extracts the exact amount of compressed data while discarding padding bytes
+
+The padding mechanism ensures that:
+
+- All codewords are exactly 255 bytes (matching the RS code parameters)
+- The actual compressed data size can be determined without additional metadata
+- Streaming decoders can process data without seeking
+
+#### 4.3.5 Error Recovery
+
+Each 255-byte codeword can independently correct up to:
+
+- **Light**: 8 bytes of errors
+- **Standard**: 16 bytes of errors
+- **Heavy**: 32 bytes of errors
+
+Errors beyond these limits in a single codeword will cause that codeword to fail decoding, but other codewords in the
+same block may still be recoverable if their error count is within limits.
 
 ## 5. Final Trailer Format
 
