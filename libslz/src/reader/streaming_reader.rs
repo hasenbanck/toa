@@ -7,6 +7,12 @@ use crate::{
 };
 
 /// A single-threaded streaming SLZ decompressor.
+///
+/// Validating the data and metadata by setting the `validate_rs` parameter of the factory function
+/// to `true` will activate RS verification and error correction, which slows down the decoding
+/// speed. To not pay this price, the user should either not validate and instead re-do the
+/// decoding in a blake3 hash error case, or use the other reader, which either have to buffer
+/// the data because of multi threading, or can re-read the block by seeking.
 pub struct SLZStreamingReader<R> {
     inner: Option<R>,
     header: Option<SLZHeader>,
