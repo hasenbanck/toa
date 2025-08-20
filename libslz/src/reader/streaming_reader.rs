@@ -286,7 +286,11 @@ mod tests {
         assert_eq!(decompressed, original_data);
     }
 
-    fn test_ecc_round_trip(ecc_level: crate::ErrorCorrection, data_size: usize, pattern_multiplier: u32) {
+    fn test_ecc_round_trip(
+        ecc_level: crate::ErrorCorrection,
+        data_size: usize,
+        pattern_multiplier: u32,
+    ) {
         let mut original_data = Vec::new();
         for i in 0..data_size {
             original_data.push(((i as u32 * pattern_multiplier + 13) % 256) as u8);

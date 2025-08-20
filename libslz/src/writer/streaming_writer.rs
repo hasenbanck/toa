@@ -520,12 +520,15 @@ mod tests {
         assert_eq!(buffer.as_slice(), expected_compressed);
     }
 
-    #[test]
-    fn test_slz_writer_with_light_error_correction() {
+    fn test_slz_writer_with_error_correction(
+        ecc_level: ErrorCorrection,
+        expected_capability_bits: u8,
+        decode_fn: fn(&mut [u8; 255]) -> Result<bool>,
+    ) {
         let mut output = Vec::new();
 
         let options = SLZOptions::from_preset(3)
-            .with_error_correction(ErrorCorrection::Light)
+            .with_error_correction(ecc_level)
             .with_block_size_exponent(Some(16));
 
         let mut writer = SLZStreamingWriter::new(&mut output, options);
@@ -542,7 +545,7 @@ mod tests {
         assert_eq!(output.len(), 34 + 64 + 255 + 64);
 
         let capabilities = output[5];
-        assert_eq!(capabilities & 0b11, 0b01);
+        assert_eq!(capabilities & 0b11, expected_capability_bits);
 
         let codeword_start = 34 + 64; // After header + block header
         let codeword = &output[codeword_start..codeword_start + 255];
@@ -550,84 +553,36 @@ mod tests {
         let mut codeword_copy = [0u8; 255];
         codeword_copy.copy_from_slice(codeword);
 
-        let decode_result = reed_solomon::code_255_239::decode(&mut codeword_copy);
+        let decode_result = decode_fn(&mut codeword_copy);
         assert!(decode_result.is_ok());
         let corrected = decode_result.unwrap();
         assert!(!corrected);
+    }
 
-        // Verify padding structure according to specification 4.3.2
-        // First byte contains padding size
-        let padding_size = codeword[0];
-        assert_eq!(padding_size, 182);
+    #[test]
+    fn test_slz_writer_with_light_error_correction() {
+        test_slz_writer_with_error_correction(
+            ErrorCorrection::Light,
+            0b01,
+            reed_solomon::code_255_239::decode,
+        );
     }
 
     #[test]
     fn test_slz_writer_with_medium_error_correction() {
-        let mut output = Vec::new();
-
-        let options = SLZOptions::from_preset(3)
-            .with_error_correction(ErrorCorrection::Medium)
-            .with_block_size_exponent(Some(16));
-
-        let mut writer = SLZStreamingWriter::new(&mut output, options);
-
-        let test_data = b"Hello, SLZ with Reed-Solomon error correction!";
-        writer.write_all(test_data).unwrap();
-
-        writer.finish().unwrap();
-
-        assert_eq!(output.len(), 34 + 64 + 255 + 64);
-
-        let capabilities = output[5];
-        assert_eq!(capabilities & 0b11, 0b10);
-
-        let codeword_start = 34 + 64; // After header + block header
-        let codeword = &output[codeword_start..codeword_start + 255];
-
-        let mut codeword_copy = [0u8; 255];
-        codeword_copy.copy_from_slice(codeword);
-
-        let decode_result = reed_solomon::code_255_223::decode(&mut codeword_copy);
-        assert!(decode_result.is_ok());
-        let corrected = decode_result.unwrap();
-        assert!(!corrected);
-
-        let padding_size = codeword[0];
-        assert_eq!(padding_size, 166);
+        test_slz_writer_with_error_correction(
+            ErrorCorrection::Medium,
+            0b10,
+            reed_solomon::code_255_223::decode,
+        );
     }
 
     #[test]
     fn test_slz_writer_with_heavy_error_correction() {
-        let mut output = Vec::new();
-
-        let options = SLZOptions::from_preset(3)
-            .with_error_correction(ErrorCorrection::Heavy)
-            .with_block_size_exponent(Some(16));
-
-        let mut writer = SLZStreamingWriter::new(&mut output, options);
-
-        let test_data = b"Hello, SLZ with Reed-Solomon error correction!";
-        writer.write_all(test_data).unwrap();
-
-        writer.finish().unwrap();
-
-        assert_eq!(output.len(), 34 + 64 + 255 + 64);
-
-        let capabilities = output[5];
-        assert_eq!(capabilities & 0b11, 0b11);
-
-        let codeword_start = 34 + 64; // After header + block header
-        let codeword = &output[codeword_start..codeword_start + 255];
-
-        let mut codeword_copy = [0u8; 255];
-        codeword_copy.copy_from_slice(codeword);
-
-        let decode_result = reed_solomon::code_255_191::decode(&mut codeword_copy);
-        assert!(decode_result.is_ok());
-        let corrected = decode_result.unwrap();
-        assert!(!corrected);
-
-        let padding_size = codeword[0];
-        assert_eq!(padding_size, 134);
+        test_slz_writer_with_error_correction(
+            ErrorCorrection::Heavy,
+            0b11,
+            reed_solomon::code_255_191::decode,
+        );
     }
 }

@@ -1,6 +1,6 @@
 # Streaming-LZMA Archive Format Specification
 
-Version 0.5
+Version 0.6
 
 ## 1. Introduction
 
@@ -358,14 +358,13 @@ All protection levels use the same field parameters as the metadata protection:
 
 #### 4.3.2 Protected Data Structure
 
-The compressed data is organized into Reed-Solomon codewords. The first byte of the first codeword contains the padding
-size, indicating how many zero padding bytes were added at the end of the last codeword's data section:
+The compressed LZMA data stream is divided into Reed-Solomon codewords. Each codeword consists of data bytes
+followed by parity bytes:
 
 ```
 +--------------------------------+
 | RS Codeword 0                  |
-|   Padding size (1 byte)        |  Number of padding bytes in last codeword
-|   Data (≤ data_len-1 bytes)    |  First part of compressed data
+|   Data (data_len bytes)        |  First part of compressed data
 |   Parity (parity_len bytes)    |  RS parity bytes
 +--------------------------------+
 | RS Codeword 1                  |
@@ -375,7 +374,8 @@ size, indicating how many zero padding bytes were added at the end of the last c
 |             ...                |
 +--------------------------------+
 | RS Codeword N                  |
-|   Data (data_len bytes)        |  Last part of compressed data + zero padding
+|   Data (≤ data_len bytes)      |  Last part of compressed data
+|   Zero padding (as needed)     |  Padding to complete codeword
 |   Parity (parity_len bytes)    |  RS parity bytes
 +--------------------------------+
 ```
@@ -386,38 +386,27 @@ Where `data_len` and `parity_len` depend on the protection level:
 - **Medium**: data_len = 223, parity_len = 32
 - **Heavy**: data_len = 191, parity_len = 64
 
-#### 4.3.3 Calculating Actual Compressed Size
+The LZMA compressed stream includes an end-of-stream marker (the distance-length pair of 0xFFFFFFFF, 2) which
+allows the decompressor to determine the exact end of the compressed data (without needing to know the padding size).
+If the compressed data does not fill the last codeword completely, the remaining data bytes are zero-padded.
 
-The physical block size in the block header includes all Reed-Solomon overhead. To determine the actual compressed data
-size:
-
-```
-num_codewords = physical_block_size / 255
-total_data_capacity = (num_codewords * data_len) - 1  // -1 for padding size byte
-actual_compressed_size = total_data_capacity - padding_size
-```
-
-**Example**: For RS(255,223) protection with a physical block size of 1020 bytes:
-
-- Number of codewords: 1020 / 255 = 4
-- Total data capacity: (4 × 223) - 1 = 891 bytes
-- If padding_size = 5: actual compressed size = 891 - 5 = 886 bytes
-
-#### 4.3.4 Implementation Notes
+#### 4.3.3 Implementation Notes
 
 This design maintains the streaming-friendly property of the format:
 
-1. The decoder reads the first codeword and extracts the padding size
-2. It processes all codewords sequentially, applying RS correction as needed
-3. It correctly extracts the exact amount of compressed data while discarding padding bytes
+1. The decoder processes codewords sequentially, applying RS correction as needed
+2. It feeds the decoded data bytes to the LZMA decompressor
+3. The LZMA decompressor naturally stops when it encounters the end-of-stream marker
+4. Any zero padding in the last codeword is ignored by the LZMA decompressor
 
-The padding mechanism ensures that:
+The end-of-stream marker ensures that:
 
-- All codewords are exactly 255 bytes (matching the RS code parameters)
-- The actual compressed data size can be determined without additional metadata
+- The exact compressed data size is determined by the LZMA stream itself
+- No additional metadata is needed to track padding
 - Streaming decoders can process data without seeking
+- Corruption of the EOS marker is detected either by RS correction failure or LZMA decompression error
 
-#### 4.3.5 Error Recovery
+#### 4.3.4 Error Recovery
 
 Each 255-byte codeword can independently correct up to:
 
@@ -1219,11 +1208,12 @@ Files using this format SHOULD use the extension `.slz`.
 
 ## Revision History
 
-- Version 0.5 (2025-08-18): Major revision for improved robustness:
-    - Moved block trailer to header with RS(64,40) protection;
-    - Added RS(34,10) protection to file header;
-    - Removed Delta prefilter and end-of-blocks marker;
-    - Added capabilities field for future extensibility;
+- Version 0.6 (2025-08-20): Added data protection using RS.
+- Version 0.5 (2025-08-18): Major revision for improved robustness
+    - Moved block trailer to header with RS(64,40) protection
+    - Added RS(34,10) protection to file header
+    - Removed Delta prefilter and end-of-blocks marker
+    - Added capabilities field for future extensibility
     - Use MSB flags to distinguish block headers from final trailer
     - Renamed compressed block size to physical block size
 - Version 0.4 (2025-08-17): Added block trailers with chaining values and Reed-Solomon protection

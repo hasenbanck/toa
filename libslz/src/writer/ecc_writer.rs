@@ -67,50 +67,16 @@ impl<W: Write> ECCWriter<W> {
         }
 
         let mut pos = 0;
-        let mut first_codeword = true;
 
         while pos < data.len() {
             let mut codeword_data = [0u8; DATA_LEN];
-            let actual_data_len;
-            let padding_size;
+            let remaining_data = data.len() - pos;
+            let actual_data_len = DATA_LEN.min(remaining_data);
 
-            if first_codeword {
-                // First codeword: reserve first byte for padding size.
-                let available_space = DATA_LEN - 1;
-                let remaining_data = data.len() - pos;
-                actual_data_len = available_space.min(remaining_data);
+            // Padding bytes come from the zero initialization.
+            codeword_data[..actual_data_len].copy_from_slice(&data[pos..pos + actual_data_len]);
 
-                codeword_data[1..1 + actual_data_len]
-                    .copy_from_slice(&data[pos..pos + actual_data_len]);
-                pos += actual_data_len;
-
-                // Calculate total padding needed for the last codeword.
-                if pos >= data.len() {
-                    // This is also the last codeword, calculate padding.
-                    let used_in_last = actual_data_len + 1; // +1 for padding size byte
-                    padding_size = (DATA_LEN - used_in_last) as u8;
-                } else {
-                    // More data to come, calculate padding for the final codeword.
-                    let remaining = data.len() - pos;
-                    let _full_codewords_needed = remaining / DATA_LEN;
-                    let last_codeword_size = remaining % DATA_LEN;
-
-                    if last_codeword_size == 0 {
-                        padding_size = 0;
-                    } else {
-                        padding_size = (DATA_LEN - last_codeword_size) as u8;
-                    }
-                }
-
-                codeword_data[0] = padding_size;
-                first_codeword = false;
-            } else {
-                // Subsequent codewords: Use full data space.
-                let remaining_data = data.len() - pos;
-                actual_data_len = DATA_LEN.min(remaining_data);
-                codeword_data[..actual_data_len].copy_from_slice(&data[pos..pos + actual_data_len]);
-                pos += actual_data_len;
-            }
+            pos += actual_data_len;
 
             let parity = encode_rs_fn(&codeword_data);
 
@@ -185,14 +151,9 @@ mod tests {
 
         assert_eq!(output.len(), 255);
 
-        let padding_size = output[0];
+        assert_eq!(&output[..test_data.len()], test_data);
 
-        // 239 data bytes - 1 padding byte - actual data.
-        let expected_padding = 239 - 1 - test_data.len();
-
-        assert_eq!(padding_size as usize, expected_padding);
-        assert_eq!(&output[1..1 + test_data.len()], test_data);
-        for i in (1 + test_data.len())..239 {
+        for i in test_data.len()..239 {
             assert_eq!(output[i], 0, "Padding should be zero at position {}", i);
         }
 
@@ -213,19 +174,17 @@ mod tests {
         // We should have 2 codewords: 2 * 255 = 510 bytes.
         assert_eq!(output.len(), 2 * 255);
 
-        let first_padding_size = output[0];
+        assert_eq!(&output[..239], &test_data[0..239]);
 
-        // First codeword can hold 238 bytes of actual data (239 - 1 for padding size).
-        let second_codeword_data_size = 300 - 238;
-        let second_codeword_padding = 239 - second_codeword_data_size;
-
-        assert_eq!(first_padding_size as usize, second_codeword_padding);
-
-        assert_eq!(&output[1..239], &test_data[0..238]);
+        let second_codeword_data_size = 300 - 239;
 
         assert_eq!(
             &output[255..255 + second_codeword_data_size],
-            &test_data[238..]
+            &test_data[239..]
         );
+
+        for i in (255 + second_codeword_data_size)..(255 + 239) {
+            assert_eq!(output[i], 0, "Padding should be zero at position {}", i);
+        }
     }
 }

@@ -33,7 +33,6 @@ pub(crate) struct ECCReader<R> {
     codeword_buffer: Vec<u8>,
     validate_rs: bool,
     uses_buffer: bool,
-    is_first_codeword: bool,
 }
 
 impl<R: OptimizedReader> ECCReader<R> {
@@ -61,7 +60,6 @@ impl<R: OptimizedReader> ECCReader<R> {
             codeword_buffer,
             validate_rs,
             uses_buffer,
-            is_first_codeword: true,
         }
     }
 
@@ -119,22 +117,8 @@ impl<R: OptimizedReader> ECCReader<R> {
                     }
                 }
 
-                // Extract data portion based on codeword type.
-                if self.is_first_codeword {
-                    // TODO: We can change the specification, since LZMA KNOWS when to stop through the end of stream marker!
-                    let data_start = 1;
-                    let data_end = DATA_LEN;
-                    let data_len = data_end - data_start;
-
-                    self.buffer.resize(data_len, 0);
-                    self.buffer
-                        .copy_from_slice(&codeword_array[data_start..data_end]);
-                    self.is_first_codeword = false;
-                } else {
-                    let data_len = DATA_LEN;
-                    self.buffer.resize(data_len, 0);
-                    self.buffer.copy_from_slice(&codeword_array[..data_len]);
-                }
+                self.buffer.resize(DATA_LEN, 0);
+                self.buffer.copy_from_slice(&codeword_array[..DATA_LEN]);
 
                 self.buffer_pos = 0;
             }
