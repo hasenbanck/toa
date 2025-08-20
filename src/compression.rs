@@ -62,10 +62,19 @@ pub(crate) fn compress_file(
         options = options.with_dictionary_size(dict_size);
     }
     if let Some(block_size) = cli.block_size {
-        options = options.with_block_size_exponent(Some(block_size));
+        if block_size == 0 {
+            // Block size 0 means maximum block size (single block mode).
+            options = options.with_block_size_exponent(None);
+        } else {
+            options = options.with_block_size_exponent(Some(block_size));
+        }
     } else if let Some(block_count) = cli.block_count {
         let calculated_exponent = calculate_block_size_exponent(file_size, block_count);
         options = options.with_block_size_exponent(calculated_exponent);
+    } else {
+        // Default behavior: set block size to match dictionary size of the selected preset.
+        let dict_size_log2 = options.dict_size_log2();
+        options = options.with_block_size_exponent(Some(dict_size_log2));
     }
 
     options = options.with_error_correction(cli.ecc);

@@ -192,6 +192,11 @@ impl SLZOptions {
             .min(lzma::DICT_SIZE_MAX)
     }
 
+    /// Get dictionary size as power of 2 exponent.
+    pub fn dict_size_log2(&self) -> u8 {
+        self.dictionary_size_log2
+    }
+
     /// Get block size in bytes. Returns None if single-block mode.
     pub fn block_size(&self) -> Option<u64> {
         self.block_size_exponent.map(|exp| 2u64.pow(exp as u32))

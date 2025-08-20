@@ -89,10 +89,10 @@ impl Cli {
             )
             .arg(
                 Arg::new("block-size")
-                    .help("Block size as power of 2 (16-62, e.g., 26 = 64MiB)")
+                    .help("Block size as power of 2 (0, 16-62, e.g., 26 = 64MiB). Use 0 for maximum block size. Default: matches dictionary size of selected preset.")
                     .long("block-size")
                     .value_name("N")
-                    .value_parser(value_parser!(u8).range(16..=62)),
+                    .value_parser(value_parser!(u8).range(0..=62)),
             )
             .arg(
                 Arg::new("block-count")
