@@ -68,6 +68,8 @@ pub(crate) fn compress_file(
         options = options.with_block_size_exponent(calculated_exponent);
     }
 
+    options = options.with_error_correction(cli.ecc);
+
     let mut slz_writer = SLZStreamingWriter::new(output_writer, options);
 
     let start_time = Instant::now();

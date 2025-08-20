@@ -130,7 +130,7 @@ One byte indicating optional features:
 - **Bits 0-1**: Reed-Solomon data protection level
     - `0b00`: None (Only metadata is protected)
     - `0b01`: Light - RS(255,239), 6.3% overhead
-    - `0b10`: Standard - RS(255,223), 12.5% overhead
+    - `0b10`: Medium - RS(255,223), 12.5% overhead
     - `0b11`: Heavy - RS(255,191), 25% overhead
 - **Bits 2-7**: Reserved (must be 0)
 
@@ -346,9 +346,9 @@ addition to the metadata protection.
 
 The capabilities field (Section 3.3) defines three levels of data protection:
 
-- **Light** - RS(255,239): 6.3% overhead, corrects up to 8 bytes per 255
-- **Standard** - RS(255,223): 12.5% overhead, corrects up to 16 bytes per 255
-- **Heavy** - RS(255,191): 25% overhead, corrects up to 32 bytes per 255
+- **Light** - RS(255,239): 6.3% overhead, corrects up to 8 bytes per 255, below optical media standards.
+- **Medium** - RS(255,223): 12.5% overhead, corrects up to 16 bytes per 255, around DVD protection.
+- **Heavy** - RS(255,191): 25% overhead, corrects up to 32 bytes per 255, around CD protection.
 
 All protection levels use the same field parameters as the metadata protection:
 
@@ -383,7 +383,7 @@ size, indicating how many zero padding bytes were added at the end of the last c
 Where `data_len` and `parity_len` depend on the protection level:
 
 - **Light**: data_len = 239, parity_len = 16
-- **Standard**: data_len = 223, parity_len = 32
+- **Medium**: data_len = 223, parity_len = 32
 - **Heavy**: data_len = 191, parity_len = 64
 
 #### 4.3.3 Calculating Actual Compressed Size
@@ -422,7 +422,7 @@ The padding mechanism ensures that:
 Each 255-byte codeword can independently correct up to:
 
 - **Light**: 8 bytes of errors
-- **Standard**: 16 bytes of errors
+- **Medium**: 16 bytes of errors
 - **Heavy**: 32 bytes of errors
 
 Errors beyond these limits in a single codeword will cause that codeword to fail decoding, but other codewords in the

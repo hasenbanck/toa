@@ -1,0 +1,231 @@
+use alloc::vec::Vec;
+
+use crate::{
+    ErrorCorrection, Result, Write,
+    reed_solomon::{code_255_191, code_255_223, code_255_239},
+};
+
+type EncodeFunction<W> = fn(&mut ECCWriter<W>, &[u8]) -> Result<()>;
+
+fn encode_none<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
+    writer.inner.write_all(data)
+}
+
+fn encode_light<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
+    writer.encode_with_rs::<_, 239, 16>(data, code_255_239::encode)
+}
+
+fn encode_medium<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
+    writer.encode_with_rs::<_, 223, 32>(data, code_255_223::encode)
+}
+
+fn encode_heavy<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
+    writer.encode_with_rs::<_, 191, 64>(data, code_255_191::encode)
+}
+
+/// Error Correction Code Writer that applies Reed-Solomon encoding to compressed data.
+pub(crate) struct ECCWriter<W> {
+    inner: W,
+    encode_fn: EncodeFunction<W>,
+    buffer: Vec<u8>,
+    uses_buffer: bool,
+}
+
+impl<W: Write> ECCWriter<W> {
+    /// Create a new ECCWriter with the specified error correction level.
+    pub(crate) fn new(inner: W, error_correction: ErrorCorrection) -> Self {
+        let (encode_fn, uses_buffer) = match error_correction {
+            ErrorCorrection::None => (encode_none as EncodeFunction<W>, false),
+            ErrorCorrection::Light => (encode_light as EncodeFunction<W>, true),
+            ErrorCorrection::Medium => (encode_medium as EncodeFunction<W>, true),
+            ErrorCorrection::Heavy => (encode_heavy as EncodeFunction<W>, true),
+        };
+
+        Self {
+            inner,
+            encode_fn,
+            buffer: Vec::new(),
+            uses_buffer,
+        }
+    }
+
+    fn encode_and_write_data(&mut self, data: &[u8]) -> Result<()> {
+        (self.encode_fn)(self, data)
+    }
+
+    #[inline(always)]
+    fn encode_with_rs<F, const DATA_LEN: usize, const PARITY_LEN: usize>(
+        &mut self,
+        data: &[u8],
+        encode_rs_fn: F,
+    ) -> Result<()>
+    where
+        F: Fn(&[u8; DATA_LEN]) -> [u8; PARITY_LEN],
+    {
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let mut pos = 0;
+        let mut first_codeword = true;
+
+        while pos < data.len() {
+            let mut codeword_data = [0u8; DATA_LEN];
+            let actual_data_len;
+            let padding_size;
+
+            if first_codeword {
+                // First codeword: reserve first byte for padding size.
+                let available_space = DATA_LEN - 1;
+                let remaining_data = data.len() - pos;
+                actual_data_len = available_space.min(remaining_data);
+
+                codeword_data[1..1 + actual_data_len]
+                    .copy_from_slice(&data[pos..pos + actual_data_len]);
+                pos += actual_data_len;
+
+                // Calculate total padding needed for the last codeword.
+                if pos >= data.len() {
+                    // This is also the last codeword, calculate padding.
+                    let used_in_last = actual_data_len + 1; // +1 for padding size byte
+                    padding_size = (DATA_LEN - used_in_last) as u8;
+                } else {
+                    // More data to come, calculate padding for the final codeword.
+                    let remaining = data.len() - pos;
+                    let _full_codewords_needed = remaining / DATA_LEN;
+                    let last_codeword_size = remaining % DATA_LEN;
+
+                    if last_codeword_size == 0 {
+                        padding_size = 0;
+                    } else {
+                        padding_size = (DATA_LEN - last_codeword_size) as u8;
+                    }
+                }
+
+                codeword_data[0] = padding_size;
+                first_codeword = false;
+            } else {
+                // Subsequent codewords: Use full data space.
+                let remaining_data = data.len() - pos;
+                actual_data_len = DATA_LEN.min(remaining_data);
+                codeword_data[..actual_data_len].copy_from_slice(&data[pos..pos + actual_data_len]);
+                pos += actual_data_len;
+            }
+
+            let parity = encode_rs_fn(&codeword_data);
+
+            self.inner.write_all(&codeword_data)?;
+            self.inner.write_all(&parity)?;
+        }
+
+        Ok(())
+    }
+
+    /// Finish writing and flush any remaining data.
+    pub(crate) fn finish(mut self) -> Result<W> {
+        // Process any remaining data in the buffer
+        if !self.buffer.is_empty() {
+            let data = core::mem::take(&mut self.buffer);
+            self.encode_and_write_data(&data)?;
+        }
+
+        Ok(self.inner)
+    }
+}
+
+impl<W: Write> Write for ECCWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        if !self.uses_buffer {
+            return self.inner.write(buf);
+        }
+
+        self.buffer.extend_from_slice(buf);
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        if !self.uses_buffer {
+            self.inner.flush()
+        } else {
+            // For RS modes, we need to wait for finish() to process the buffer.
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use super::*;
+
+    #[test]
+    fn test_ec_writer_none_passthrough() {
+        let mut output = Vec::new();
+        let mut ec_writer = ECCWriter::new(&mut output, ErrorCorrection::None);
+
+        let test_data = b"Hello, World!";
+        ec_writer.write_all(test_data).unwrap();
+
+        let _final_output = ec_writer.finish().unwrap();
+
+        assert_eq!(output, test_data);
+    }
+
+    #[test]
+    fn test_ec_writer_light_encoding() {
+        let mut output = Vec::new();
+        let mut ec_writer = ECCWriter::new(&mut output, ErrorCorrection::Light);
+
+        let test_data = b"Hello, Reed-Solomon encoding!";
+        ec_writer.write_all(test_data).unwrap();
+
+        let _final_output = ec_writer.finish().unwrap();
+
+        assert_eq!(output.len(), 255);
+
+        let padding_size = output[0];
+
+        // 239 data bytes - 1 padding byte - actual data.
+        let expected_padding = 239 - 1 - test_data.len();
+
+        assert_eq!(padding_size as usize, expected_padding);
+        assert_eq!(&output[1..1 + test_data.len()], test_data);
+        for i in (1 + test_data.len())..239 {
+            assert_eq!(output[i], 0, "Padding should be zero at position {}", i);
+        }
+
+        assert_eq!(output[239..].len(), 16);
+    }
+
+    #[test]
+    fn test_ec_writer_multiple_codewords() {
+        let mut output = Vec::new();
+        let mut ec_writer = ECCWriter::new(&mut output, ErrorCorrection::Light);
+
+        let mut test_data = Vec::new();
+        test_data.extend_from_slice(b"A".repeat(300).as_slice());
+
+        ec_writer.write_all(&test_data).unwrap();
+        let _final_output = ec_writer.finish().unwrap();
+
+        // We should have 2 codewords: 2 * 255 = 510 bytes.
+        assert_eq!(output.len(), 2 * 255);
+
+        let first_padding_size = output[0];
+
+        // First codeword can hold 238 bytes of actual data (239 - 1 for padding size).
+        let second_codeword_data_size = 300 - 238;
+        let second_codeword_padding = 239 - second_codeword_data_size;
+
+        assert_eq!(first_padding_size as usize, second_codeword_padding);
+
+        assert_eq!(&output[1..239], &test_data[0..238]);
+
+        assert_eq!(
+            &output[255..255 + second_codeword_data_size],
+            &test_data[238..]
+        );
+    }
+}

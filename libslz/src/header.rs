@@ -1,6 +1,6 @@
 use super::{
-    Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data, error_unsupported,
-    lzma,
+    ErrorCorrection, Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
+    error_unsupported, lzma,
     reed_solomon::{code_34_10, code_64_40},
 };
 
@@ -20,7 +20,7 @@ impl SLZHeader {
     /// Create a new SLZ header from options.
     pub fn from_options(options: &SLZOptions) -> Self {
         Self {
-            capabilities: 0x00,
+            capabilities: options.error_correction.capability_bits(),
             prefilter: options.prefilter,
             block_size_exponent: options.block_size_exponent.unwrap_or(62),
             lc: options.lc,
@@ -33,6 +33,17 @@ impl SLZHeader {
     /// Get the capabilities field.
     pub fn capabilities(&self) -> u8 {
         self.capabilities
+    }
+
+    /// Get the error correction level from the capabilities.
+    pub fn error_correction(&self) -> ErrorCorrection {
+        match self.capabilities & 0b11 {
+            0b00 => ErrorCorrection::None,
+            0b01 => ErrorCorrection::Light,
+            0b10 => ErrorCorrection::Medium,
+            0b11 => ErrorCorrection::Heavy,
+            _ => unreachable!(),
+        }
     }
 
     /// Get the prefilter used.
@@ -92,8 +103,15 @@ impl SLZHeader {
         }
 
         let capabilities = corrected_buffer[5];
-        if capabilities != 0x00 {
-            return Err(error_unsupported("unsupported SLZ capabilities"));
+        if (capabilities & 0b11111100) != 0 {
+            return Err(error_unsupported(
+                "unsupported SLZ capabilities (reserved bits set)",
+            ));
+        }
+
+        let error_correction_bits = capabilities & 0b11;
+        if error_correction_bits > 0b11 {
+            return Err(error_unsupported("invalid error correction level"));
         }
 
         let prefilter_byte = corrected_buffer[6];

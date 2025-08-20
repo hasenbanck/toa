@@ -117,6 +117,8 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                 let reader = Reader::new(
                     inner,
                     header.prefilter(),
+                    header.error_correction(),
+                    self.validate_rs,
                     header.lc(),
                     header.lp(),
                     header.pb(),
@@ -282,5 +284,41 @@ mod tests {
         reader.read_to_end(&mut decompressed).unwrap();
 
         assert_eq!(decompressed, original_data);
+    }
+
+    fn test_ecc_round_trip(ecc_level: crate::ErrorCorrection, data_size: usize, pattern_multiplier: u32) {
+        let mut original_data = Vec::new();
+        for i in 0..data_size {
+            original_data.push(((i as u32 * pattern_multiplier + 13) % 256) as u8);
+        }
+
+        let mut compressed = Vec::new();
+        let options = SLZOptions::default().with_error_correction(ecc_level);
+
+        let mut writer = SLZStreamingWriter::new(Cursor::new(&mut compressed), options);
+        writer.write_all(&original_data).unwrap();
+        writer.finish().unwrap();
+
+        let slice_reader = SliceReader::new(compressed.deref());
+        let mut reader = SLZStreamingReader::new(slice_reader, true);
+        let mut decompressed = Vec::new();
+        reader.read_to_end(&mut decompressed).unwrap();
+
+        assert_eq!(decompressed, original_data);
+    }
+
+    #[test]
+    fn test_round_trip_light_ecc() {
+        test_ecc_round_trip(crate::ErrorCorrection::Light, 400, 1);
+    }
+
+    #[test]
+    fn test_round_trip_medium_ecc() {
+        test_ecc_round_trip(crate::ErrorCorrection::Medium, 350, 7);
+    }
+
+    #[test]
+    fn test_round_trip_heavy_ecc() {
+        test_ecc_round_trip(crate::ErrorCorrection::Heavy, 300, 11);
     }
 }

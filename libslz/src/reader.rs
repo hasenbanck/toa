@@ -1,24 +1,26 @@
+mod ecc_reader;
 mod streaming_reader;
 
 pub use streaming_reader::SLZStreamingReader;
 
 use crate::{
-    Prefilter, Read, Result,
+    ErrorCorrection, Prefilter, Read, Result,
     lzma::{filter::bcj::BCJReader, lzma_reader::LZMAReader, optimized_reader::OptimizedReader},
+    reader::ecc_reader::ECCReader,
 };
 
 /// All possible reader combinations.
 #[allow(clippy::large_enum_variant)]
 enum Reader<R> {
-    Lzma(LZMAReader<R>),
-    BcjX86(BCJReader<LZMAReader<R>>),
-    BcjArm(BCJReader<LZMAReader<R>>),
-    BcjArmThumb(BCJReader<LZMAReader<R>>),
-    BcjArm64(BCJReader<LZMAReader<R>>),
-    BcjSparc(BCJReader<LZMAReader<R>>),
-    BcjPowerPc(BCJReader<LZMAReader<R>>),
-    BcjIa64(BCJReader<LZMAReader<R>>),
-    BcjRiscV(BCJReader<LZMAReader<R>>),
+    Lzma(LZMAReader<ECCReader<R>>),
+    BcjX86(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjArm(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjArmThumb(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjArm64(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjSparc(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjPowerPc(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjIa64(BCJReader<LZMAReader<ECCReader<R>>>),
+    BcjRiscV(BCJReader<LZMAReader<ECCReader<R>>>),
 }
 
 impl<R: OptimizedReader> Read for Reader<R> {
@@ -42,13 +44,17 @@ impl<R: OptimizedReader> Reader<R> {
     fn new(
         reader: R,
         prefilter: Prefilter,
+        error_correction: ErrorCorrection,
+        validate_rs: bool,
         lc: u8,
         lp: u8,
         pb: u8,
         dict_size: u32,
     ) -> Result<Self> {
+        let ecc_reader = ECCReader::new(reader, error_correction, validate_rs);
+
         let lzma_reader = LZMAReader::new(
-            reader,
+            ecc_reader,
             u64::MAX,
             lc as u32,
             lp as u32,
@@ -76,15 +82,15 @@ impl<R: OptimizedReader> Reader<R> {
     /// Extract the inner reader from the reader chain.
     fn into_inner(self) -> R {
         match self {
-            Reader::Lzma(reader) => reader.into_inner(),
-            Reader::BcjX86(reader) => reader.into_inner().into_inner(),
-            Reader::BcjArm(reader) => reader.into_inner().into_inner(),
-            Reader::BcjArmThumb(reader) => reader.into_inner().into_inner(),
-            Reader::BcjArm64(reader) => reader.into_inner().into_inner(),
-            Reader::BcjSparc(reader) => reader.into_inner().into_inner(),
-            Reader::BcjPowerPc(reader) => reader.into_inner().into_inner(),
-            Reader::BcjIa64(reader) => reader.into_inner().into_inner(),
-            Reader::BcjRiscV(reader) => reader.into_inner().into_inner(),
+            Reader::Lzma(reader) => reader.into_inner().into_inner(),
+            Reader::BcjX86(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjArm(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjArmThumb(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjArm64(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjSparc(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjPowerPc(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjIa64(reader) => reader.into_inner().into_inner().into_inner(),
+            Reader::BcjRiscV(reader) => reader.into_inner().into_inner().into_inner(),
         }
     }
 }

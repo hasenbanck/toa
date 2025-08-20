@@ -18,6 +18,8 @@
 
 /// Building blocks for all codes.
 mod primitives {
+    use crate::error_invalid_data;
+
     // GF(256) parameters
     const PRIMITIVE_POLY: u16 = 0x11D; // (x^8 + x^4 + x^3 + x^2 + 1)
     const GF_EXP_LEN: usize = 512;
@@ -374,7 +376,7 @@ mod primitives {
         omega_len: usize,
         lambda: &[u8; PARITY_LEN_PLUS_ONE],
         lambda_len: usize,
-    ) -> Result<[u8; HALF_PARITY_LEN], &'static str> {
+    ) -> crate::Result<[u8; HALF_PARITY_LEN]> {
         // We need the formal derivative of Lambda, Λ'(x).
         let mut lambda_deriv = [0u8; PARITY_LEN_PLUS_ONE];
         let mut lambda_deriv_len = 0;
@@ -393,7 +395,9 @@ mod primitives {
             let denom = poly_eval(&lambda_deriv, lambda_deriv_len, x_inv);
             if denom == 0 {
                 // This indicates a decoder failure, possibly due to too many errors.
-                return Err("Zero derivative at error position (cannot invert)");
+                return Err(error_invalid_data(
+                    "zero derivative at error position (cannot invert)",
+                ));
             }
 
             // In GF(2^n), negation is the identity op, so -A = A.
@@ -412,7 +416,7 @@ mod primitives {
         lambda: &[u8; PARITY_LEN_PLUS_ONE],
         lambda_len: usize,
         num_errors: usize,
-    ) -> Result<([usize; HALF_PARITY_LEN], usize), &'static str> {
+    ) -> crate::Result<([usize; HALF_PARITY_LEN], usize)> {
         let mut err_pos = [0usize; HALF_PARITY_LEN];
         let mut err_count = 0usize;
 
@@ -424,21 +428,23 @@ mod primitives {
                     err_pos[err_count] = pos;
                     err_count += 1;
                 } else {
-                    return Err("Too many roots found");
+                    return Err(error_invalid_data("too many roots found"));
                 }
             }
         }
 
         if err_count == 0 {
-            return Err("No error positions found");
+            return Err(error_invalid_data("no error positions found"));
         }
 
         if err_count != num_errors {
-            return Err("Mismatch between locator degree and roots found");
+            return Err(error_invalid_data(
+                "mismatch between locator degree and roots found",
+            ));
         }
 
         if err_count > PARITY_LEN / 2 {
-            return Err("Too many errors to correct");
+            return Err(error_invalid_data("too many errors to correct"));
         }
 
         Ok((err_pos, err_count))
@@ -446,23 +452,25 @@ mod primitives {
 
     fn find_error_locator_poly<const PARITY_LEN: usize, const PARITY_LEN_PLUS_ONE: usize>(
         syndromes: &mut [u8; PARITY_LEN],
-    ) -> Result<([u8; PARITY_LEN_PLUS_ONE], usize, usize), &'static str> {
+    ) -> crate::Result<([u8; PARITY_LEN_PLUS_ONE], usize, usize)> {
         let mut lambda = [0u8; PARITY_LEN_PLUS_ONE];
         let mut lambda_len = 0;
         berlekamp_massey::<PARITY_LEN_PLUS_ONE>(syndromes, &mut lambda, &mut lambda_len);
 
         if lambda_len == 0 {
-            return Err("No error locator found");
+            return Err(error_invalid_data("no error locator found"));
         }
 
         let num_errors = lambda_len - 1;
 
         if num_errors == 0 {
-            return Err("No errors located");
+            return Err(error_invalid_data("no errors located"));
         }
 
         if num_errors > PARITY_LEN {
-            return Err("Too many errors (locator degree > parity)");
+            return Err(error_invalid_data(
+                "too many errors (locator degree > parity)",
+            ));
         }
 
         Ok((lambda, lambda_len, num_errors))
@@ -526,7 +534,7 @@ mod primitives {
         const MAX_POLY: usize,
     >(
         codeword: &mut [u8; CODEWORD_SIZE],
-    ) -> Result<bool, &'static str> {
+    ) -> crate::Result<bool> {
         // The received codeword polynomial is C(x) = D(x) * x^32 + P(x).
         // Our arrays store coefficients from the lowest degree to highest, so we arrange it as:
         // c = [p_0, p_1, ..., p_31, d_0, d_1, ..., d_31]
@@ -572,7 +580,9 @@ mod primitives {
 
         // Step 7: Verify that the correction was successful.
         if !verify_correction::<PARITY_LEN, CODEWORD_SIZE>(&c) {
-            return Err("Correction failed; syndromes are still non-zero");
+            return Err(error_invalid_data(
+                "correction failed; syndromes are still non-zero",
+            ));
         }
 
         // Step 8: Write corrected data back into the original buffer.
@@ -614,7 +624,7 @@ pub(crate) mod code_255_239 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
+    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -739,7 +749,7 @@ pub(crate) mod code_255_223 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
+    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -874,7 +884,7 @@ pub(crate) mod code_255_191 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
+    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -1009,7 +1019,7 @@ pub(crate) mod code_64_40 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
+    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -1248,7 +1258,7 @@ pub(crate) mod code_34_10 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> Result<bool, &'static str> {
+    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,

@@ -1,9 +1,10 @@
+mod ecc_writer;
 mod streaming_writer;
 
 pub use streaming_writer::SLZStreamingWriter;
 
 use crate::{
-    Prefilter, lzma,
+    ErrorCorrection, Prefilter, lzma,
     lzma::{EncodeMode, lz::MFType},
 };
 
@@ -12,6 +13,8 @@ use crate::{
 pub struct SLZOptions {
     /// Prefilter to apply before compression.
     pub(crate) prefilter: Prefilter,
+    /// Reed-Solomon error correction level for data protection.
+    pub(crate) error_correction: ErrorCorrection,
     /// Dictionary size to use for the LZMA compression algorithm as a power of two.
     pub(crate) dictionary_size_log2: u8,
     /// LZMA literal context bits (0-8).
@@ -37,6 +40,7 @@ impl Default for SLZOptions {
     fn default() -> Self {
         Self {
             prefilter: Prefilter::None,
+            error_correction: ErrorCorrection::None,
             dictionary_size_log2: 26,
             lc: 3,
             lp: 0,
@@ -83,6 +87,7 @@ impl SLZOptions {
     pub fn from_preset(preset: u32) -> Self {
         let preset = preset.min(9);
 
+        let error_correction = ErrorCorrection::None;
         let prefilter = Prefilter::None;
         let lc = 3;
         let lp = 0;
@@ -115,6 +120,7 @@ impl SLZOptions {
 
         Self {
             prefilter,
+            error_correction,
             dictionary_size_log2,
             lc,
             lp,
@@ -154,6 +160,12 @@ impl SLZOptions {
     /// Set the prefilter to use.
     pub fn with_prefilter(mut self, prefilter: Prefilter) -> Self {
         self.prefilter = prefilter;
+        self
+    }
+
+    /// Set the Reed-Solomon error correction level for data protection.
+    pub fn with_error_correction(mut self, error_correction: ErrorCorrection) -> Self {
+        self.error_correction = error_correction;
         self
     }
 

@@ -6,7 +6,7 @@ mod util;
 use std::{fs, io::Result, process};
 
 use clap::{Arg, ArgMatches, Command, value_parser};
-use libslz::Prefilter;
+use libslz::{ErrorCorrection, Prefilter};
 
 use crate::{
     compression::compress_file, decompression::decompress_file, list::list_file_info,
@@ -35,6 +35,7 @@ struct Cli {
     lp: Option<u8>,
     pb: Option<u8>,
     dict_size: Option<u8>,
+    ecc: ErrorCorrection,
 }
 
 impl Cli {
@@ -173,6 +174,14 @@ impl Cli {
                     .long("dict-size")
                     .value_name("N")
                     .value_parser(value_parser!(u8).range(16..=30)),
+            )
+            .arg(
+                Arg::new("ecc")
+                    .help("Error correction level for data protection")
+                    .long("ecc")
+                    .value_name("LEVEL")
+                    .value_parser(["none", "light", "medium", "heavy"])
+                    .default_value("none"),
             )
             .arg(
                 Arg::new("preset")
@@ -316,6 +325,13 @@ impl Cli {
             lp: matches.get_one::<u8>("lp").copied(),
             pb: matches.get_one::<u8>("pb").copied(),
             dict_size: matches.get_one::<u8>("dict-size").copied(),
+            ecc: match matches.get_one::<String>("ecc").unwrap().as_str() {
+                "none" => ErrorCorrection::None,
+                "light" => ErrorCorrection::Light,
+                "medium" => ErrorCorrection::Medium,
+                "heavy" => ErrorCorrection::Heavy,
+                _ => ErrorCorrection::None,
+            },
         }
     }
 

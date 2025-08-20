@@ -86,6 +86,37 @@ const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
 
 const SLZ_VERSION: u8 = 0x01;
 
+/// Reed-Solomon error correction levels for data protection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorCorrection {
+    /// No error correction (only metadata is protected)
+    None,
+    /// Light protection - RS(255,239), 6.3% overhead, corrects up to 8 bytes per 255 byte block.
+    ///
+    /// Below optical media standards.
+    Light,
+    /// Medium protection - RS(255,223), 12.5% overhead, corrects up to 16 bytes per 255 byte block.
+    ///
+    /// Around DVD/Blu-ray equivalent protection.
+    Medium,
+    /// Heavy protection - RS(255,191), 25% overhead, corrects up to 32 bytes per 255 byte block.
+    ///
+    /// Around CD-level protection.
+    Heavy,
+}
+
+impl ErrorCorrection {
+    /// Get the capability bits for the header.
+    pub(crate) fn capability_bits(self) -> u8 {
+        match self {
+            ErrorCorrection::None => 0b00,
+            ErrorCorrection::Light => 0b01,
+            ErrorCorrection::Medium => 0b10,
+            ErrorCorrection::Heavy => 0b11,
+        }
+    }
+}
+
 /// Prefilter types that can be applied before LZMA compression to improve compression ratios
 /// for specific data types like executable files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

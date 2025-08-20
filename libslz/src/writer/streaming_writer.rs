@@ -9,20 +9,21 @@ use crate::{
     header::{SLZBlockHeader, SLZHeader},
     lzma::{LZMAOptions, LZMAWriter, filter::bcj::BCJWriter},
     trailer::SLZFileTrailer,
+    writer::ecc_writer::ECCWriter,
 };
 
 /// All possible writer combination.
 #[allow(clippy::large_enum_variant)]
 enum Writer {
-    Lzma(LZMAWriter<Vec<u8>>),
-    BcjX86(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjArm(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjArmThumb(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjArm64(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjSparc(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjPowerPc(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjIa64(BCJWriter<LZMAWriter<Vec<u8>>>),
-    BcjRiscV(BCJWriter<LZMAWriter<Vec<u8>>>),
+    Lzma(LZMAWriter<ECCWriter<Vec<u8>>>),
+    BcjX86(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjArm(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjArmThumb(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjArm64(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjSparc(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjPowerPc(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjIa64(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    BcjRiscV(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
 }
 
 impl Write for Writer {
@@ -58,8 +59,10 @@ impl Write for Writer {
 impl Writer {
     /// Create a new writer chain based on the options.
     fn new(options: &SLZOptions, buffer: Vec<u8>) -> Result<Self> {
+        let ecc_writer = ECCWriter::new(buffer, options.error_correction);
+
         let lzma_writer = LZMAWriter::new_no_header(
-            buffer,
+            ecc_writer,
             &LZMAOptions {
                 dict_size: options.dict_size(),
                 lc: u32::from(options.lc),
@@ -90,19 +93,22 @@ impl Writer {
         Ok(chain)
     }
 
-    /// Finish the writer chain and extract the compressed data
+    /// Finish the writer chain and extract the compressed data.
     fn finish(self) -> Result<Vec<u8>> {
-        match self {
-            Writer::Lzma(writer) => writer.finish(),
-            Writer::BcjX86(writer) => writer.into_inner().finish(),
-            Writer::BcjArm(writer) => writer.into_inner().finish(),
-            Writer::BcjArmThumb(writer) => writer.into_inner().finish(),
-            Writer::BcjArm64(writer) => writer.into_inner().finish(),
-            Writer::BcjSparc(writer) => writer.into_inner().finish(),
-            Writer::BcjPowerPc(writer) => writer.into_inner().finish(),
-            Writer::BcjIa64(writer) => writer.into_inner().finish(),
-            Writer::BcjRiscV(writer) => writer.into_inner().finish(),
-        }
+        let ecc_writer = match self {
+            Writer::Lzma(writer) => writer.finish()?,
+            Writer::BcjX86(writer) => writer.into_inner().finish()?,
+            Writer::BcjArm(writer) => writer.into_inner().finish()?,
+            Writer::BcjArmThumb(writer) => writer.into_inner().finish()?,
+            Writer::BcjArm64(writer) => writer.into_inner().finish()?,
+            Writer::BcjSparc(writer) => writer.into_inner().finish()?,
+            Writer::BcjPowerPc(writer) => writer.into_inner().finish()?,
+            Writer::BcjIa64(writer) => writer.into_inner().finish()?,
+            Writer::BcjRiscV(writer) => writer.into_inner().finish()?,
+        };
+
+        // Finish the ECCWriter to get the final data.
+        ecc_writer.finish()
     }
 }
 
@@ -223,7 +229,7 @@ impl<W: Write> SLZStreamingWriter<W> {
         }
 
         if let Some(counting_writer) = self.writer.take() {
-            // Determine if this is a partial block based on the block size
+            // Determine if this is a partial block based on the block size.
             let header = SLZHeader::from_options(&self.options);
             let is_partial_block = self.current_block_uncompressed_size < header.block_size();
             self.finish_current_block(counting_writer, true, is_partial_block)?;
@@ -263,7 +269,7 @@ impl<W: Write> Write for SLZStreamingWriter<W> {
             if self.current_block_uncompressed_size >= block_limit {
                 // Current block is full, finish it and start a new one.
                 if let Some(writer) = self.writer.take() {
-                    // Full blocks are never partial (they're exactly block_size)
+                    // Full blocks are never partial (they're exactly block_size).
                     let buffer = self.finish_current_block(writer, false, false)?;
                     self.start_new_block(buffer)?;
                 }
@@ -309,6 +315,7 @@ mod tests {
     use hex_literal::hex;
 
     use super::*;
+    use crate::{ErrorCorrection, reed_solomon};
 
     // Specification: Appendix A.1 Minimal File
     #[test]
@@ -511,5 +518,116 @@ mod tests {
         );
 
         assert_eq!(buffer.as_slice(), expected_compressed);
+    }
+
+    #[test]
+    fn test_slz_writer_with_light_error_correction() {
+        let mut output = Vec::new();
+
+        let options = SLZOptions::from_preset(3)
+            .with_error_correction(ErrorCorrection::Light)
+            .with_block_size_exponent(Some(16));
+
+        let mut writer = SLZStreamingWriter::new(&mut output, options);
+
+        let test_data = b"Hello, SLZ with Reed-Solomon error correction!";
+        writer.write_all(test_data).unwrap();
+
+        writer.finish().unwrap();
+
+        // 1. SLZ header (34 bytes)
+        // 2. Block header (64 bytes)
+        // 3. Reed-Solomon encoded compressed data (255 bytes)
+        // 4. Final trailer (64 bytes)
+        assert_eq!(output.len(), 34 + 64 + 255 + 64);
+
+        let capabilities = output[5];
+        assert_eq!(capabilities & 0b11, 0b01);
+
+        let codeword_start = 34 + 64; // After header + block header
+        let codeword = &output[codeword_start..codeword_start + 255];
+
+        let mut codeword_copy = [0u8; 255];
+        codeword_copy.copy_from_slice(codeword);
+
+        let decode_result = reed_solomon::code_255_239::decode(&mut codeword_copy);
+        assert!(decode_result.is_ok());
+        let corrected = decode_result.unwrap();
+        assert!(!corrected);
+
+        // Verify padding structure according to specification 4.3.2
+        // First byte contains padding size
+        let padding_size = codeword[0];
+        assert_eq!(padding_size, 182);
+    }
+
+    #[test]
+    fn test_slz_writer_with_medium_error_correction() {
+        let mut output = Vec::new();
+
+        let options = SLZOptions::from_preset(3)
+            .with_error_correction(ErrorCorrection::Medium)
+            .with_block_size_exponent(Some(16));
+
+        let mut writer = SLZStreamingWriter::new(&mut output, options);
+
+        let test_data = b"Hello, SLZ with Reed-Solomon error correction!";
+        writer.write_all(test_data).unwrap();
+
+        writer.finish().unwrap();
+
+        assert_eq!(output.len(), 34 + 64 + 255 + 64);
+
+        let capabilities = output[5];
+        assert_eq!(capabilities & 0b11, 0b10);
+
+        let codeword_start = 34 + 64; // After header + block header
+        let codeword = &output[codeword_start..codeword_start + 255];
+
+        let mut codeword_copy = [0u8; 255];
+        codeword_copy.copy_from_slice(codeword);
+
+        let decode_result = reed_solomon::code_255_223::decode(&mut codeword_copy);
+        assert!(decode_result.is_ok());
+        let corrected = decode_result.unwrap();
+        assert!(!corrected);
+
+        let padding_size = codeword[0];
+        assert_eq!(padding_size, 166);
+    }
+
+    #[test]
+    fn test_slz_writer_with_heavy_error_correction() {
+        let mut output = Vec::new();
+
+        let options = SLZOptions::from_preset(3)
+            .with_error_correction(ErrorCorrection::Heavy)
+            .with_block_size_exponent(Some(16));
+
+        let mut writer = SLZStreamingWriter::new(&mut output, options);
+
+        let test_data = b"Hello, SLZ with Reed-Solomon error correction!";
+        writer.write_all(test_data).unwrap();
+
+        writer.finish().unwrap();
+
+        assert_eq!(output.len(), 34 + 64 + 255 + 64);
+
+        let capabilities = output[5];
+        assert_eq!(capabilities & 0b11, 0b11);
+
+        let codeword_start = 34 + 64; // After header + block header
+        let codeword = &output[codeword_start..codeword_start + 255];
+
+        let mut codeword_copy = [0u8; 255];
+        codeword_copy.copy_from_slice(codeword);
+
+        let decode_result = reed_solomon::code_255_191::decode(&mut codeword_copy);
+        assert!(decode_result.is_ok());
+        let corrected = decode_result.unwrap();
+        assert!(!corrected);
+
+        let padding_size = codeword[0];
+        assert_eq!(padding_size, 134);
     }
 }
