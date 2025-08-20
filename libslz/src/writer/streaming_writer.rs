@@ -1,12 +1,13 @@
 use alloc::vec::Vec;
 
-use blake3::hazmat::{ChainingValue, HasherExt};
+use blake3::hazmat::HasherExt;
 
 use crate::{
-    Prefilter, Result, SLZOptions, Write, error_invalid_data,
+    Prefilter, Result, SLZOptions, Write,
+    cv_stack::CVStack,
+    error_invalid_data,
     header::{SLZBlockHeader, SLZHeader},
     lzma::{LZMAOptions, LZMAWriter, filter::bcj::BCJWriter},
-    resolve_cv_stack,
     trailer::SLZFileTrailer,
 };
 
@@ -113,7 +114,7 @@ pub struct SLZStreamingWriter<W> {
     header_written: bool,
     current_block_uncompressed_size: u64,
     current_block_hasher: blake3::Hasher,
-    block_chaining_values: Vec<[u8; 32]>,
+    cv_stack: CVStack,
     uncompressed_size: u64,
     compressed_size: u64,
 }
@@ -128,7 +129,7 @@ impl<W: Write> SLZStreamingWriter<W> {
             header_written: false,
             current_block_uncompressed_size: 0,
             current_block_hasher: blake3::Hasher::new(),
-            block_chaining_values: Vec::new(),
+            cv_stack: CVStack::new(),
             uncompressed_size: 0,
             compressed_size: 0,
         }
@@ -179,13 +180,14 @@ impl<W: Write> SLZStreamingWriter<W> {
             }
 
             // For single-block files, we finalize as root. For multi-block files, as chaining value.
-            let hash_value = if is_final_block && self.block_chaining_values.is_empty() {
+            let hash_value = if is_final_block && self.cv_stack.is_empty() {
                 *self.current_block_hasher.finalize().as_bytes()
             } else {
                 self.current_block_hasher.finalize_non_root()
             };
 
-            self.block_chaining_values.push(hash_value);
+            self.cv_stack
+                .add_chunk_chaining_value(hash_value, is_final_block);
 
             let header = SLZBlockHeader::new(compressed_size as u64, is_partial_block, hash_value);
             header.write(&mut self.inner)?;
@@ -202,31 +204,11 @@ impl<W: Write> SLZStreamingWriter<W> {
     }
 
     fn write_file_trailer(&mut self) -> Result<()> {
-        // Compute root hash by merging all block chaining values
-        let root_hash = if self.block_chaining_values.is_empty() {
-            // Empty file case - hash of empty data
-            *blake3::Hasher::new().finalize().as_bytes()
-        } else if self.block_chaining_values.len() == 1 {
-            // Single block file - the block already contains the root hash
-            self.block_chaining_values[0]
-        } else {
-            // Multi-block file - merge chaining values
-            self.merge_chaining_values()?
-        };
+        let root_hash = self.cv_stack.finalize();
+        self.cv_stack.reset();
 
         let trailer = SLZFileTrailer::new(self.uncompressed_size, root_hash);
         trailer.write(&mut self.inner)
-    }
-
-    /// Use BLAKE3's hazmat module to properly merge chaining values.
-    fn merge_chaining_values(&self) -> Result<[u8; 32]> {
-        let cv_stack: Vec<ChainingValue> = self
-            .block_chaining_values
-            .iter()
-            .map(|&bytes| ChainingValue::from(bytes))
-            .collect();
-
-        resolve_cv_stack(cv_stack)
     }
 
     /// Consume the writer and return the inner writer.

@@ -1,17 +1,10 @@
-use blake3::hazmat::{ChainingValue, HasherExt};
+use blake3::hazmat::HasherExt;
 
 use super::Reader;
 use crate::{
-    Read, Result, SLZHeader, error_invalid_data, header::SLZBlockHeader,
-    lzma::optimized_reader::OptimizedReader, resolve_cv_stack, trailer::SLZFileTrailer,
+    Read, Result, SLZHeader, cv_stack::CVStack, error_invalid_data, header::SLZBlockHeader,
+    lzma::optimized_reader::OptimizedReader, trailer::SLZFileTrailer,
 };
-
-/// Block validation information stored for each block.
-#[derive(Debug, Clone)]
-struct BlockInfo {
-    /// Hash value from the block trailer (chaining value or root hash)
-    stored_hash: [u8; 32],
-}
 
 /// A single-threaded streaming SLZ decompressor.
 pub struct SLZStreamingReader<R> {
@@ -24,7 +17,7 @@ pub struct SLZStreamingReader<R> {
     current_block_uncompressed_size: u64,
     current_block_physical_size: u64,
     current_block_expected_hash: Option<[u8; 32]>,
-    blocks: Vec<BlockInfo>,
+    cv_stack: CVStack,
     total_uncompressed_size: u64,
     validate_rs: bool,
     partial_block_msb_set: bool,
@@ -43,7 +36,7 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
             current_block_uncompressed_size: 0,
             current_block_physical_size: 0,
             current_block_expected_hash: None,
-            blocks: Vec::new(),
+            cv_stack: CVStack::new(),
             total_uncompressed_size: 0,
             validate_rs,
             partial_block_msb_set: false,
@@ -70,8 +63,14 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                 // MSB=1: This is the final trailer.
                 self.blocks_finished = true;
 
+                // Add the last blocks hash to the CV stack now that we know it IS the last.
+                if let Some(hash) = self.current_block_expected_hash.take() {
+                    self.cv_stack.add_chunk_chaining_value(hash, true);
+                }
+
                 let trailer = SLZFileTrailer::parse(&header_data, self.validate_rs)?;
-                let computed_root_hash = self.compute_root_hash()?;
+                let computed_root_hash = self.cv_stack.finalize();
+                self.cv_stack.reset();
 
                 if computed_root_hash != trailer.blake3_hash() {
                     return Err(error_invalid_data("blake3 hash mismatch"));
@@ -87,6 +86,11 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                     return Err(error_invalid_data(
                         "partial blocks only allowed as final block",
                     ));
+                }
+
+                // Add the last blocks hash to the CV stack now that we know it IS NOT the last.
+                if let Some(pending_hash) = self.current_block_expected_hash.take() {
+                    self.cv_stack.add_chunk_chaining_value(pending_hash, false);
                 }
 
                 let block_header = SLZBlockHeader::parse(&header_data, self.validate_rs)?;
@@ -131,20 +135,17 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
         if let Some(reader) = self.current_reader.take() {
             let recovered_inner = reader.into_inner();
 
-            // Get the expected hash from when we parsed the block header
             let expected_hash = self
                 .current_block_expected_hash
                 .ok_or_else(|| error_invalid_data("no expected hash for current block"))?;
 
             // For the first block, we need to determine if it's a root hash or chaining value.
-            let stored_hash = if self.blocks.is_empty() {
+            if self.cv_stack.is_empty() {
                 let hasher_clone = self.current_block_hasher.clone();
                 let computed_root_hash = *self.current_block_hasher.finalize().as_bytes();
                 let computed_chaining_value = hasher_clone.finalize_non_root();
 
-                if expected_hash == computed_root_hash || expected_hash == computed_chaining_value {
-                    expected_hash
-                } else {
+                if expected_hash != computed_root_hash && expected_hash != computed_chaining_value {
                     return Err(error_invalid_data(
                         "block hash mismatch with expected hash from header",
                     ));
@@ -157,40 +158,11 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                         "block chaining value mismatch with expected hash from header",
                     ));
                 }
-                expected_hash
             };
 
-            let block_info = BlockInfo { stored_hash };
-            self.blocks.push(block_info);
-
-            self.current_block_expected_hash = None;
             self.inner = Some(recovered_inner);
         }
         Ok(())
-    }
-
-    /// Use BLAKE3's hazmat module to properly merge chaining values.
-    fn compute_root_hash(&self) -> Result<[u8; 32]> {
-        let chaining_values: Vec<[u8; 32]> =
-            self.blocks.iter().map(|block| block.stored_hash).collect();
-
-        if self.blocks.is_empty() {
-            // Empty file case - hash of empty data.
-            return Ok(*blake3::Hasher::new().finalize().as_bytes());
-        }
-
-        if chaining_values.len() == 1 {
-            // Single block file - the stored value is already the root hash.
-            return Ok(chaining_values[0]);
-        }
-
-        // Multi-block file - merge chaining values.
-        let cv_stack: Vec<ChainingValue> = chaining_values
-            .iter()
-            .map(|&bytes| ChainingValue::from(bytes))
-            .collect();
-
-        resolve_cv_stack(cv_stack)
     }
 
     /// Consume the reader and return the inner reader.

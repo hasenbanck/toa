@@ -40,6 +40,7 @@
 
 extern crate alloc;
 
+mod cv_stack;
 mod lzma;
 mod reader;
 pub mod reed_solomon;
@@ -59,7 +60,7 @@ pub(crate) use std::io::Read;
 #[cfg(feature = "std")]
 pub(crate) use std::io::Write;
 
-use blake3::hazmat::{ChainingValue, Mode};
+pub use cv_stack::CVStack;
 pub use header::{SLZBlockHeader, SLZHeader};
 pub use lzma::optimized_reader;
 pub use metadata::SLZMetadata;
@@ -220,34 +221,4 @@ fn error_unsupported(msg: &'static str) -> Error {
 #[inline(always)]
 fn copy_error(error: &Error) -> Error {
     *error
-}
-
-fn resolve_cv_stack(mut cv_stack: Vec<ChainingValue>) -> Result<[u8; 32]> {
-    // TODO Verify that all CVs except the last one are of the same size and also a power of two.
-    //      If this is not the case, we have a invalid stream.
-
-    while cv_stack.len() > 1 {
-        let mut next_level = Vec::new();
-
-        for chunk in cv_stack.chunks(2) {
-            if chunk.len() == 2 {
-                // Merge two chaining values - use root merging for the final level.
-                let is_root = cv_stack.len() == 2;
-                let mode = Mode::Hash;
-                let merged = if is_root {
-                    blake3::hazmat::merge_subtrees_root(&chunk[0], &chunk[1], mode).into()
-                } else {
-                    blake3::hazmat::merge_subtrees_non_root(&chunk[0], &chunk[1], mode)
-                };
-                next_level.push(merged);
-            } else {
-                // Odd number - promote the last one.
-                next_level.push(chunk[0]);
-            }
-        }
-
-        cv_stack = next_level;
-    }
-
-    Ok(cv_stack[0])
 }

@@ -34,29 +34,31 @@ TARGET_DIR="target"
 BINARY_NAME="slz"
 EXT=""
 
-case "$OS" in
-    Linux)
-        TARGET="$TARGET_DIR/$ARCH-unknown-linux-gnu/release"
+case "$OS-$ARCH" in
+    Linux-x86_64)
+        RUST_TARGET="x86_64-unknown-linux-gnu"
         ;;
-    Darwin)
-        TARGET="$TARGET_DIR/$ARCH-apple-darwin/release"
+    Linux-aarch64)
+        RUST_TARGET="aarch64-unknown-linux-gnu"
         ;;
-    MINGW*|MSYS*|CYGWIN*|Windows_NT)
-        TARGET="$TARGET_DIR/x86_64-pc-windows-msvc/release"
+    Darwin-x86_64)
+        RUST_TARGET="x86_64-apple-darwin"
+        ;;
+    Darwin-arm64)
+        RUST_TARGET="aarch64-apple-darwin"
+        ;;
+    MINGW*-*|MSYS*-*|CYGWIN*-*|Windows_NT-*)
+        RUST_TARGET="x86_64-pc-windows-msvc"
         EXT=".exe"
         ;;
     *)
-        echo "Unsupported OS: $OS"
+        echo "Unsupported OS-ARCH combination: $OS-$ARCH"
         exit 1
         ;;
 esac
 
-BIN="$TARGET/$BINARY_NAME$EXT"
-
-if [ ! -f "$BIN" ]; then
-    echo "Error: binary not found at $BIN"
-    exit 1
-fi
+TARGET_SPECIFIC="$TARGET_DIR/$RUST_TARGET/release"
+BIN="$TARGET_SPECIFIC/$BINARY_NAME$EXT"
 
 # Step 4: Run compression and decompression to create a PGO profile (block size = 2^^26 64 MiB).
 "$BIN" --preset 7 --block-size=26 --keep "$KERNEL_TAR"
