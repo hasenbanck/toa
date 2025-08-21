@@ -1,7 +1,7 @@
 //! # TOA Compression File Format
 //!
 //! This project implements the **TOA compression file format**, an experimental compression format
-//! designed for streaming operation, parallel processing, and corruption resilience. The format
+//! designed for streaming operation, parallel processing and corruption resilience. The format
 //! uses LZMA as the primary compression algorithm with BLAKE3 cryptographic hashing and
 //! Reed-Solomon error correction codes.
 //!

@@ -1,10 +1,10 @@
 # TOA Compression File Format
 
 This project implements the **TOA compression file format**, an experimental compression format
-designed for streaming operation, parallel processing, and corruption resilience. The format uses LZMA as the primary
+designed for streaming operation, parallel processing and corruption resilience. The format uses LZMA as the primary
 compression algorithm with BLAKE3 cryptographic hashing and Reed-Solomon error correction codes.
 
-**Note: The TOA format is currently in draft mode (v0.4) and not yet frozen. The specification may change in future
+**Note: The TOA format is currently in draft mode (v0.7) and not yet frozen. The specification may change in future
 versions.**
 
 ## Installation and Usage

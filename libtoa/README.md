@@ -2,6 +2,9 @@
 
 Library to compress & decompress TOA files (.toa).
 
+**Note: The TOA format is currently in draft mode (v0.7) and not yet frozen. The specification may change in future
+versions.**
+
 ## Acknowledgement
 
 - The lzma code is a hard copy of the lzma-rust crate of it's LZMA and BCJ / Delta code (Apache 2 license).

@@ -1,6 +1,6 @@
 [package]
 name = "libtoa"
-description = "Streaming LZMA compression library"
+description = "TOA compression file format library"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
 homepage = "https://github.com/hasenbanck/toa/"
 repository = "https://github.com/hasenbanck/toa/"

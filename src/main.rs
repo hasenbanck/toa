@@ -41,7 +41,7 @@ struct Cli {
 impl Cli {
     fn build_command() -> Command {
         Command::new("toa")
-            .about("Compress and decompress files using the TOA (Streaming LZMA) format")
+            .about("Compress and decompress files using the TOA compression file format")
             .version(env!("CARGO_PKG_VERSION"))
             .arg_required_else_help(true)
             .arg(
