@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use libslz::{SLZOptions, SLZStreamingWriter};
+use libtoa::{TOAOptions, TOAStreamingWriter};
 
 use crate::Cli;
 
@@ -44,7 +44,7 @@ pub(crate) fn compress_file(
     let output_file = File::create(output_path)?;
     let output_writer = BufWriter::with_capacity(65536, output_file);
 
-    let mut options = SLZOptions::from_preset(cli.preset);
+    let mut options = TOAOptions::from_preset(cli.preset);
 
     let prefilter = cli.get_prefilter()?;
     options = options.with_prefilter(prefilter);
@@ -79,7 +79,7 @@ pub(crate) fn compress_file(
 
     options = options.with_error_correction(cli.ecc);
 
-    let mut slz_writer = SLZStreamingWriter::new(output_writer, options);
+    let mut toa_writer = TOAStreamingWriter::new(output_writer, options);
 
     let start_time = Instant::now();
 
@@ -90,12 +90,12 @@ pub(crate) fn compress_file(
         match input_reader.read(&mut buffer)? {
             0 => break,
             n => {
-                slz_writer.write_all(&buffer[..n])?;
+                toa_writer.write_all(&buffer[..n])?;
                 bytes_read += n as u64;
             }
         }
     }
-    slz_writer.finish()?;
+    toa_writer.finish()?;
 
     let elapsed = start_time.elapsed();
 

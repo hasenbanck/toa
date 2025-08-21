@@ -1,16 +1,16 @@
 mod ecc_writer;
 mod streaming_writer;
 
-pub use streaming_writer::SLZStreamingWriter;
+pub use streaming_writer::TOAStreamingWriter;
 
 use crate::{
     ErrorCorrection, Prefilter, lzma,
     lzma::{EncodeMode, lz::MFType},
 };
 
-/// Options for SLZ compression.
+/// Options for TOA compression.
 #[derive(Debug, Clone, Copy)]
-pub struct SLZOptions {
+pub struct TOAOptions {
     /// Prefilter to apply before compression.
     pub(crate) prefilter: Prefilter,
     /// Reed-Solomon error correction level for data protection.
@@ -36,7 +36,7 @@ pub struct SLZOptions {
     pub(crate) block_size_exponent: Option<u8>,
 }
 
-impl Default for SLZOptions {
+impl Default for TOAOptions {
     fn default() -> Self {
         Self {
             prefilter: Prefilter::None,
@@ -54,7 +54,7 @@ impl Default for SLZOptions {
     }
 }
 
-impl SLZOptions {
+impl TOAOptions {
     const PRESET_TO_DICT_SIZE_LOG2: &'static [u8] = &[
         19, // (0) 512 KiB
         20, // (1) 1 MiB

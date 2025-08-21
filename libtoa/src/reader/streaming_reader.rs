@@ -2,20 +2,20 @@ use blake3::hazmat::HasherExt;
 
 use super::Reader;
 use crate::{
-    Read, Result, SLZHeader, cv_stack::CVStack, error_invalid_data, header::SLZBlockHeader,
-    lzma::optimized_reader::OptimizedReader, trailer::SLZFileTrailer,
+    Read, Result, TOAHeader, cv_stack::CVStack, error_invalid_data, header::TOABlockHeader,
+    lzma::optimized_reader::OptimizedReader, trailer::TOAFileTrailer,
 };
 
-/// A single-threaded streaming SLZ decompressor.
+/// A single-threaded streaming TOA decompressor.
 ///
 /// Validating the data and metadata by setting the `validate_rs` parameter of the factory function
 /// to `true` will activate RS verification and error correction, which slows down the decoding
 /// speed. To not pay this price, the user should either not validate and instead re-do the
 /// decoding in a blake3 hash error case, or use the other reader, which either have to buffer
 /// the data because of multi threading, or can re-read the block by seeking.
-pub struct SLZStreamingReader<R> {
+pub struct TOAStreamingReader<R> {
     inner: Option<R>,
-    header: Option<SLZHeader>,
+    header: Option<TOAHeader>,
     current_reader: Option<Reader<R>>,
     blocks_finished: bool,
     trailer_read: bool,
@@ -29,8 +29,8 @@ pub struct SLZStreamingReader<R> {
     partial_block_msb_set: bool,
 }
 
-impl<R: OptimizedReader> SLZStreamingReader<R> {
-    /// Create a new SLZ reader.
+impl<R: OptimizedReader> TOAStreamingReader<R> {
+    /// Create a new TOA reader.
     pub fn new(inner: R, validate_rs: bool) -> Self {
         Self {
             inner: Some(inner),
@@ -63,8 +63,8 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
         let mut header_data = [0u8; 64];
         inner.read_exact(&mut header_data)?;
 
-        // Check bit 63 (MSB) to determine if this is a block header or final trailer.
-        match (header_data[7] & 0x80) != 0 {
+        // Check bit 0 (MSB) to determine if this is a block header or final trailer.
+        match (header_data[0] & 0x80) != 0 {
             true => {
                 // MSB=1: This is the final trailer.
                 self.blocks_finished = true;
@@ -74,7 +74,7 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                     self.cv_stack.add_chunk_chaining_value(hash, true);
                 }
 
-                let trailer = SLZFileTrailer::parse(&header_data, self.validate_rs)?;
+                let trailer = TOAFileTrailer::parse(&header_data, self.validate_rs)?;
                 let computed_root_hash = self.cv_stack.finalize();
                 self.cv_stack.reset();
 
@@ -99,7 +99,7 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
                     self.cv_stack.add_chunk_chaining_value(pending_hash, false);
                 }
 
-                let block_header = SLZBlockHeader::parse(&header_data, self.validate_rs)?;
+                let block_header = TOABlockHeader::parse(&header_data, self.validate_rs)?;
                 let physical_size = block_header.physical_size();
                 let is_partial_block = block_header.is_partial_block();
 
@@ -182,7 +182,7 @@ impl<R: OptimizedReader> SLZStreamingReader<R> {
     }
 }
 
-impl<R: OptimizedReader> Read for SLZStreamingReader<R> {
+impl<R: OptimizedReader> Read for TOAStreamingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -200,13 +200,13 @@ impl<R: OptimizedReader> Read for SLZStreamingReader<R> {
                 .as_mut()
                 .ok_or_else(|| error_invalid_data("reader consumed"))?;
 
-            let mut buffer = [0u8; 34];
+            let mut buffer = [0u8; 32];
 
             if inner.read_exact(&mut buffer).is_err() {
                 return Err(error_invalid_data("can't read file header"));
             }
 
-            let header = SLZHeader::parse(&buffer, self.validate_rs)?;
+            let header = TOAHeader::parse(&buffer, self.validate_rs)?;
 
             self.header = Some(header);
         }
@@ -255,19 +255,19 @@ mod tests {
     use super::*;
     use crate::{
         lzma::optimized_reader::{IoReader, SliceReader},
-        writer::{SLZOptions, SLZStreamingWriter},
+        writer::{TOAOptions, TOAStreamingWriter},
     };
 
     #[test]
     fn test_round_trip_empty() {
         let mut compressed = Vec::new();
-        let options = SLZOptions::default();
+        let options = TOAOptions::default();
 
-        let writer = SLZStreamingWriter::new(Cursor::new(&mut compressed), options);
+        let writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
         writer.finish().unwrap();
 
         let slice_reader = SliceReader::new(compressed.deref());
-        let mut reader = SLZStreamingReader::new(slice_reader, true);
+        let mut reader = TOAStreamingReader::new(slice_reader, true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 
@@ -276,16 +276,16 @@ mod tests {
 
     #[test]
     fn test_round_trip_simple_data() {
-        let original_data = b"Hello, World! This is a test of SLZ compression.";
+        let original_data = b"Hello, World! This is a test of TOA compression.";
         let mut compressed = Vec::new();
-        let options = SLZOptions::default();
+        let options = TOAOptions::default();
 
-        let mut writer = SLZStreamingWriter::new(Cursor::new(&mut compressed), options);
+        let mut writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
         writer.write_all(original_data).unwrap();
         writer.finish().unwrap();
 
         let io_reader = IoReader::new(compressed.deref());
-        let mut reader = SLZStreamingReader::new(io_reader, true);
+        let mut reader = TOAStreamingReader::new(io_reader, true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 
@@ -303,14 +303,14 @@ mod tests {
         }
 
         let mut compressed = Vec::new();
-        let options = SLZOptions::default().with_error_correction(ecc_level);
+        let options = TOAOptions::default().with_error_correction(ecc_level);
 
-        let mut writer = SLZStreamingWriter::new(Cursor::new(&mut compressed), options);
+        let mut writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
         writer.write_all(&original_data).unwrap();
         writer.finish().unwrap();
 
         let slice_reader = SliceReader::new(compressed.deref());
-        let mut reader = SLZStreamingReader::new(slice_reader, true);
+        let mut reader = TOAStreamingReader::new(slice_reader, true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 

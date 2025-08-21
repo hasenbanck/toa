@@ -1,13 +1,13 @@
 use std::fs::File;
 
-use libslz::{Prefilter, SLZMetadata};
+use libtoa::{Prefilter, TOAMetadata};
 
 use crate::{Cli, util::format_size};
 
 pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
     let input_file = File::open(&cli.input)?;
     let compressed_size = input_file.metadata()?.len();
-    let metadata = SLZMetadata::parse(input_file)?;
+    let metadata = TOAMetadata::parse(input_file)?;
 
     println!("Archive: {}", cli.input);
     println!("  Format version: 1");

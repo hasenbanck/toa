@@ -1,13 +1,13 @@
 [package]
-name = "libslz"
+name = "libtoa"
 description = "Streaming LZMA compression library"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
-homepage = "https://github.com/hasenbanck/slz/"
-repository = "https://github.com/hasenbanck/slz/"
-documentation = "https://docs.rs/libslz/latest/libslz/"
+homepage = "https://github.com/hasenbanck/toa/"
+repository = "https://github.com/hasenbanck/toa/"
+documentation = "https://docs.rs/libtoa/latest/libtoa/"
 license = "Apache-2.0"
 version = "0.1.0"
-keywords = ["lzma", "slz", "compression", "streaming"]
+keywords = ["lzma", "toa", "compression", "streaming"]
 edition = "2024"
 rust-version = "1.89"
 
@@ -16,6 +16,7 @@ blake3 = { workspace = true }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
+hex = "0.4.3"
 
 [features]
 default = ["std", "optimization"]

@@ -3,7 +3,7 @@ use std::{
     io::{Cursor, Read, Write},
 };
 
-use libslz::{Prefilter, SLZOptions, SLZStreamingReader, SLZStreamingWriter};
+use libtoa::{Prefilter, TOAOptions, TOAStreamingReader, TOAStreamingWriter};
 
 struct LZMAParameter {
     lc: u8,
@@ -17,8 +17,8 @@ fn test_bcj_filter_roundtrip(
     parameter: Option<LZMAParameter>,
     test_name: &str,
 ) {
-    let mut options_bcj = SLZOptions::from_preset(6).with_prefilter(prefilter);
-    let mut options_no_bcj = SLZOptions::from_preset(6).with_prefilter(Prefilter::None);
+    let mut options_bcj = TOAOptions::from_preset(6).with_prefilter(prefilter);
+    let mut options_no_bcj = TOAOptions::from_preset(6).with_prefilter(Prefilter::None);
 
     if let Some(parameter) = parameter {
         options_bcj = options_bcj
@@ -36,7 +36,7 @@ fn test_bcj_filter_roundtrip(
     let mut compressed_data_bcj = Vec::new();
     {
         let cursor = Cursor::new(&mut compressed_data_bcj);
-        let mut writer = SLZStreamingWriter::new(cursor, options_bcj);
+        let mut writer = TOAStreamingWriter::new(cursor, options_bcj);
         writer
             .write_all(test_data)
             .unwrap_or_else(|_| panic!("Failed to write data for {test_name}"));
@@ -49,7 +49,7 @@ fn test_bcj_filter_roundtrip(
     let mut compressed_data_no_bcj = Vec::new();
     {
         let cursor = Cursor::new(&mut compressed_data_no_bcj);
-        let mut writer = SLZStreamingWriter::new(cursor, options_no_bcj);
+        let mut writer = TOAStreamingWriter::new(cursor, options_no_bcj);
         writer
             .write_all(test_data)
             .unwrap_or_else(|_| panic!("Failed to write data for {test_name} (no BCJ)"));
@@ -78,13 +78,13 @@ fn test_bcj_filter_roundtrip(
     let mut decompressed_data = Vec::new();
     {
         let cursor = Cursor::new(compressed_data_bcj);
-        let reader = libslz::optimized_reader::BufferedReader::new(cursor)
+        let reader = libtoa::optimized_reader::BufferedReader::new(cursor)
             .unwrap_or_else(|_| panic!("Failed to create buffered reader for {test_name}"));
-        let mut slz_reader = SLZStreamingReader::new(reader, true);
+        let mut toa_reader = TOAStreamingReader::new(reader, true);
 
         let mut buffer = vec![0u8; 8192];
         loop {
-            match slz_reader.read(&mut buffer) {
+            match toa_reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => decompressed_data.extend_from_slice(&buffer[..n]),
                 Err(error) => panic!("Failed to read decompressed data for {test_name}: {error}"),

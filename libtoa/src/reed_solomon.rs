@@ -10,7 +10,7 @@
 //!     - (n=255, k=223, t=16)
 //!     - (n=255, k=191, t=32)
 //!     - (n=64, k=40, t=12)
-//!     - (n=34, k=10, t=12)
+//!     - (n=32, k=10, t=11)
 //!
 //! ## License
 //!
@@ -1225,14 +1225,14 @@ pub(crate) mod code_64_40 {
     }
 }
 
-/// Implements RS(34,10)
-pub(crate) mod code_34_10 {
+/// Implements RS(32,10)
+pub(crate) mod code_32_10 {
 
     /// The size of the data payload.
     const DATA_LEN: usize = 10;
 
     /// The size of the parity bytes.
-    const PARITY_LEN: usize = 24;
+    const PARITY_LEN: usize = 22;
 
     /// The size of the parity bytes plus one.
     const PARITY_LEN_PLUS_ONE: usize = PARITY_LEN + 1;
@@ -1249,12 +1249,12 @@ pub(crate) mod code_34_10 {
     static GEN_POLY: [u8; PARITY_LEN_PLUS_ONE] =
         super::primitives::gen_poly_const::<PARITY_LEN, _>();
 
-    /// Encode 10-byte data with RS(34,10) protection.
+    /// Encode 10-byte data with RS(32,10) protection.
     pub(crate) fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
         super::primitives::encode(&GEN_POLY, data)
     }
 
-    /// Decode codeword in-place (data || parity) for RS(34,10).
+    /// Decode codeword in-place (data || parity) for RS(32,10).
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
@@ -1290,32 +1290,23 @@ pub(crate) mod code_34_10 {
         }
 
         #[test]
-        fn test_rs_34_10_specification_test_vector_1() {
+        fn test_rs_32_10_specification_test_vector_1() {
             let data = hex!("00000000000000000000");
-            let expected_parity = hex!(
-                "0000000000000000000000000000000000000000
-                 00000000"
-            );
+            let expected_parity = hex!("00000000000000000000000000000000000000000000");
             test_vector(data, expected_parity);
         }
 
         #[test]
-        fn test_rs_34_10_specification_test_vector_2() {
+        fn test_rs_32_10_specification_test_vector_2() {
             let data = hex!("ffffffffffffffffffff");
-            let expected_parity = hex!(
-                "391dd7ff1c005e4d4bbc49c736d0f190d2444dbb
-                 714119ed"
-            );
+            let expected_parity = hex!("ad52e479625d811b5e60e40fafd4eb5b68eeb3847978");
             test_vector(data, expected_parity);
         }
 
         #[test]
-        fn test_rs_34_10_specification_test_vector_3() {
+        fn test_rs_32_10_specification_test_vector_3() {
             let data = hex!("00010203040506070809");
-            let expected_parity = hex!(
-                "1da26ab14dca41755fe7e961f1db5687428f0ee5
-                 e6248048"
-            );
+            let expected_parity = hex!("fe98b737bc91e51a91a17ced02342c9688e2688eb3fd");
             test_vector(data, expected_parity);
         }
     }

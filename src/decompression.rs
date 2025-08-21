@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use libslz::{SLZStreamingReader, optimized_reader::BufferedReader};
+use libtoa::{TOAStreamingReader, optimized_reader::BufferedReader};
 
 use crate::Cli;
 
@@ -16,7 +16,7 @@ pub(crate) fn decompress_file(
     let compressed_size = input_file.metadata()?.len();
 
     let reader = BufferedReader::new(input_file)?;
-    let mut slz_reader = SLZStreamingReader::new(reader, true);
+    let mut toa_reader = TOAStreamingReader::new(reader, true);
 
     let output_file = File::create(output_path)?;
     let mut output_writer = BufWriter::with_capacity(65536, output_file);
@@ -27,7 +27,7 @@ pub(crate) fn decompress_file(
     let mut total_written = 0u64;
 
     loop {
-        match slz_reader.read(&mut buffer)? {
+        match toa_reader.read(&mut buffer)? {
             0 => break,
             n => {
                 output_writer.write_all(&buffer[..n])?;

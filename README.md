@@ -1,34 +1,25 @@
-# Streaming-LZMA (SLZ) Compression
+# TOA Compression File Format
 
-Implementation of an experimental compression file format using LZMA optimized for streaming and parallel processing.
+This project implements the **TOA compression file format**, an experimental compression format
+designed for streaming operation, parallel processing, and corruption resilience. The format uses LZMA as the primary
+compression algorithm with BLAKE3 cryptographic hashing and Reed-Solomon error correction codes.
 
-**Note: The SLZ format is currently in draft mode (v0.4) and not yet frozen. The specification may change in future
+**Note: The TOA format is currently in draft mode (v0.4) and not yet frozen. The specification may change in future
 versions.**
-
-## Overview
-
-SLZ (Streaming-LZMA) is designed for scenarios where other compression formats fall short. The format provides:
-
-- **Streaming operation**: Read data sequentially without seeks, random access or buffering (writing needs buffering)
-- **Parallel processing**: Independent blocks enable concurrent compression and decompression for improved performance
-- **Efficient append operations**: O(n) complexity where n is the number of blocks, not the data size, thanks to BLAKE3
-  chaining values
-- **Per-block validation**: Each block has its own integrity verification with Reed-Solomon error correction
-- **High robustness**: Five-layer integrity protection from LZMA stream validation to cryptographic hashing
 
 ## Installation and Usage
 
 ### Install via Cargo
 
 ```bash
-cargo install slz
+cargo install toa
 ```
 
 ### Building from Source
 
 ```bash
 git clone <repository-url>
-cd slz
+cd toa
 cargo build --release
 ```
 
@@ -36,15 +27,15 @@ cargo build --release
 
 ```bash
 # Compress a file
-slz input.txt
-# Creates input.txt.slz
+toa input.txt
+# Creates input.txt.toa
 ```
 
 ### Decompression
 
 ```bash
 # Decompress a file
-slz --decompress input.txt.slz
+toa --decompress input.txt.toa
 # Creates input.txt
 ```
 
@@ -52,18 +43,18 @@ slz --decompress input.txt.slz
 
 ```bash
 # Set compression level (0-9, default 6)
-slz -9 input.txt
-slz --preset 9 input.txt
-slz --best input.txt
+toa -9 input.txt
+toa --preset 9 input.txt
+toa --best input.txt
 
 # Set block size for parallelization (2^^26 = 64 MiB)
-slz -6 --block-size=26 input.txt
+toa -6 --block-size=26 input.txt
 
 # List metadata and block information
-slz --list input.txt.slz
+toa --list input.txt.toa
 
 # Specify output file
-slz -o output.slz input.txt
+toa -o output.toa input.txt
 ```
 
 ## Technical Details

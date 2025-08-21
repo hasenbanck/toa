@@ -1,12 +1,12 @@
 use super::{
-    ErrorCorrection, Prefilter, SLZ_MAGIC, SLZ_VERSION, SLZOptions, Write, error_invalid_data,
+    ErrorCorrection, Prefilter, TOA_MAGIC, TOA_VERSION, TOAOptions, Write, error_invalid_data,
     error_unsupported, lzma,
-    reed_solomon::{code_34_10, code_64_40},
+    reed_solomon::{code_32_10, code_64_40},
 };
 
-/// SLZ file header containing format metadata and compression parameters.
+/// TOA file header containing format metadata and compression parameters.
 #[derive(Debug, Clone, Copy)]
-pub struct SLZHeader {
+pub struct TOAHeader {
     capabilities: u8,
     prefilter: Prefilter,
     block_size_exponent: u8,
@@ -16,9 +16,9 @@ pub struct SLZHeader {
     dict_size_log2: u8,
 }
 
-impl SLZHeader {
-    /// Create a new SLZ header from options.
-    pub fn from_options(options: &SLZOptions) -> Self {
+impl TOAHeader {
+    /// Create a new TOA header from options.
+    pub fn from_options(options: &TOAOptions) -> Self {
         Self {
             capabilities: options.error_correction.capability_bits(),
             prefilter: options.prefilter,
@@ -77,14 +77,14 @@ impl SLZHeader {
         2u64.pow(self.block_size_exponent as u32)
     }
 
-    /// Parse an SLZ header from a buffer.
-    pub fn parse(buffer: &[u8; 34], apply_rs_correction: bool) -> crate::Result<SLZHeader> {
+    /// Parse an TOA header from a buffer.
+    pub fn parse(buffer: &[u8; 32], apply_rs_correction: bool) -> crate::Result<TOAHeader> {
         let mut corrected_buffer = *buffer;
 
         if apply_rs_correction {
             let mut header_codeword = *buffer;
 
-            let corrected = code_34_10::decode(&mut header_codeword)
+            let corrected = code_32_10::decode(&mut header_codeword)
                 .map_err(|_| error_invalid_data("header Reed-Solomon correction failed"))?;
 
             if corrected {
@@ -93,19 +93,19 @@ impl SLZHeader {
             }
         }
 
-        if corrected_buffer[0..4] != SLZ_MAGIC {
-            return Err(error_invalid_data("invalid SLZ magic bytes"));
+        if corrected_buffer[0..4] != TOA_MAGIC {
+            return Err(error_invalid_data("invalid TOA magic bytes"));
         }
 
         let version = corrected_buffer[4];
-        if version != SLZ_VERSION {
-            return Err(error_unsupported("unsupported SLZ version"));
+        if version != TOA_VERSION {
+            return Err(error_unsupported("unsupported TOA version"));
         }
 
         let capabilities = corrected_buffer[5];
         if (capabilities & 0b11111100) != 0 {
             return Err(error_unsupported(
-                "unsupported SLZ capabilities (reserved bits set)",
+                "unsupported TOA capabilities (reserved bits set)",
             ));
         }
 
@@ -123,23 +123,22 @@ impl SLZHeader {
             return Err(error_invalid_data("invalid block size exponent"));
         }
 
-        let lzma_props = u16::from_le_bytes([corrected_buffer[8], corrected_buffer[9]]);
-        let props = (lzma_props & 0xFF) as u8;
-        let lc = props % 9;
-        let temp = props / 9;
+        let lzma_props_byte = corrected_buffer[8];
+        let dict_size_log2 = corrected_buffer[9];
+
+        let lc = lzma_props_byte % 9;
+        let temp = lzma_props_byte / 9;
         let lp = temp % 5;
         let pb = temp / 5;
 
         if lc > 8 || lp > 4 || pb > 4 {
             return Err(error_invalid_data("invalid LZMA properties"));
         }
-
-        let dict_size_log2 = ((lzma_props >> 8) & 0xFF) as u8;
         if !(16u8..=31u8).contains(&dict_size_log2) {
             return Err(error_invalid_data("invalid dictionary size"));
         }
 
-        Ok(SLZHeader {
+        Ok(TOAHeader {
             capabilities,
             prefilter,
             block_size_exponent,
@@ -154,19 +153,18 @@ impl SLZHeader {
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         let mut data_bytes = [0u8; 10];
 
-        data_bytes[0..4].copy_from_slice(&SLZ_MAGIC);
-        data_bytes[4] = SLZ_VERSION;
+        data_bytes[0..4].copy_from_slice(&TOA_MAGIC);
+        data_bytes[4] = TOA_VERSION;
         data_bytes[5] = self.capabilities;
         data_bytes[6] = u8::from(self.prefilter);
         data_bytes[7] = self.block_size_exponent;
 
         let lzma_props_byte = (self.pb * 5 + self.lp) * 9 + self.lc;
-        let lzma_props = u16::from_le_bytes([lzma_props_byte, self.dict_size_log2]);
-        data_bytes[8..10].copy_from_slice(&lzma_props.to_le_bytes());
+        data_bytes[8] = lzma_props_byte;
+        data_bytes[9] = self.dict_size_log2;
 
-        let parity_bytes = code_34_10::encode(&data_bytes);
-
-        let mut header_bytes = [0; 34];
+        let parity_bytes = code_32_10::encode(&data_bytes);
+        let mut header_bytes = [0; 32];
         header_bytes[..10].copy_from_slice(&data_bytes);
         header_bytes[10..].copy_from_slice(&parity_bytes);
 
@@ -174,15 +172,15 @@ impl SLZHeader {
     }
 }
 
-/// SLZ block header containing size information, hash, and Reed-Solomon parity.
+/// TOA block header containing size information, hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
-pub struct SLZBlockHeader {
+pub struct TOABlockHeader {
     physical_size_with_flags: u64,
     blake3_hash: [u8; 32],
     rs_parity: [u8; 24],
 }
 
-impl SLZBlockHeader {
+impl TOABlockHeader {
     /// Create a block header with appropriate MSB flags.
     pub fn new(physical_size: u64, is_partial: bool, blake3_hash: [u8; 32]) -> Self {
         // Clear top 2 bits
@@ -194,9 +192,11 @@ impl SLZBlockHeader {
         }
 
         let mut payload = [0u8; 40];
-        payload[..8].copy_from_slice(&physical_size_with_flags.to_le_bytes());
+        payload[..8].copy_from_slice(&physical_size_with_flags.to_be_bytes());
         payload[8..].copy_from_slice(&blake3_hash);
+
         let rs_parity = code_64_40::encode(&payload);
+
         Self {
             physical_size_with_flags,
             blake3_hash,
@@ -205,7 +205,7 @@ impl SLZBlockHeader {
     }
 
     /// Parse a block header from a buffer.
-    pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<SLZBlockHeader> {
+    pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<TOABlockHeader> {
         let mut corrected_buffer = *buffer;
 
         if apply_rs_correction {
@@ -227,7 +227,7 @@ impl SLZBlockHeader {
             }
         }
 
-        let physical_size_with_flags = u64::from_le_bytes([
+        let physical_size_with_flags = u64::from_be_bytes([
             corrected_buffer[0],
             corrected_buffer[1],
             corrected_buffer[2],
@@ -244,7 +244,7 @@ impl SLZBlockHeader {
         let mut rs_parity = [0u8; 24];
         rs_parity.copy_from_slice(&corrected_buffer[40..64]);
 
-        Ok(SLZBlockHeader {
+        Ok(TOABlockHeader {
             physical_size_with_flags,
             blake3_hash,
             rs_parity,
@@ -274,7 +274,7 @@ impl SLZBlockHeader {
     /// Write the block header to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         let mut header_bytes = [0u8; 64];
-        header_bytes[0..8].copy_from_slice(&self.physical_size_with_flags.to_le_bytes());
+        header_bytes[0..8].copy_from_slice(&self.physical_size_with_flags.to_be_bytes());
         header_bytes[8..40].copy_from_slice(&self.blake3_hash);
         header_bytes[40..64].copy_from_slice(&self.rs_parity);
 
@@ -287,19 +287,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_slz_header_roundtrip() {
-        let options = SLZOptions::from_preset(5)
+    fn test_toa_header_roundtrip() {
+        let options = TOAOptions::from_preset(5)
             .with_prefilter(Prefilter::BcjX86)
             .with_block_size_exponent(Some(20));
 
-        let header = SLZHeader::from_options(&options);
+        let header = TOAHeader::from_options(&options);
 
         let mut buffer = Vec::new();
         header.write(&mut buffer).unwrap();
 
-        let mut header_array = [0u8; 34];
+        let mut header_array = [0u8; 32];
         header_array.copy_from_slice(&buffer);
-        let parsed_header = SLZHeader::parse(&header_array, true).unwrap();
+        let parsed_header = TOAHeader::parse(&header_array, true).unwrap();
 
         assert_eq!(parsed_header.capabilities(), header.capabilities());
         assert_eq!(parsed_header.prefilter(), header.prefilter());
@@ -311,19 +311,19 @@ mod tests {
     }
 
     #[test]
-    fn test_slz_block_header_roundtrip() {
+    fn test_toa_block_header_roundtrip() {
         let physical_size = 65536;
         let is_partial = false;
         let blake3_hash = [42u8; 32];
 
-        let block_header = SLZBlockHeader::new(physical_size, is_partial, blake3_hash);
+        let block_header = TOABlockHeader::new(physical_size, is_partial, blake3_hash);
 
         let mut buffer = Vec::new();
         block_header.write(&mut buffer).unwrap();
 
         let mut header_array = [0u8; 64];
         header_array.copy_from_slice(&buffer);
-        let parsed_header = SLZBlockHeader::parse(&header_array, true).unwrap();
+        let parsed_header = TOABlockHeader::parse(&header_array, true).unwrap();
 
         assert_eq!(parsed_header.physical_size(), physical_size);
         assert_eq!(parsed_header.is_partial_block(), is_partial);

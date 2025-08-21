@@ -6,7 +6,7 @@ mod util;
 use std::{fs, io::Result, process};
 
 use clap::{Arg, ArgMatches, Command, value_parser};
-use libslz::{ErrorCorrection, Prefilter};
+use libtoa::{ErrorCorrection, Prefilter};
 
 use crate::{
     compression::compress_file, decompression::decompress_file, list::list_file_info,
@@ -40,8 +40,8 @@ struct Cli {
 
 impl Cli {
     fn build_command() -> Command {
-        Command::new("slz")
-            .about("Compress and decompress files using the SLZ (Streaming LZMA) format")
+        Command::new("toa")
+            .about("Compress and decompress files using the TOA (Streaming LZMA) format")
             .version(env!("CARGO_PKG_VERSION"))
             .arg_required_else_help(true)
             .arg(
@@ -61,7 +61,7 @@ impl Cli {
             )
             .arg(
                 Arg::new("list")
-                    .help("List information about the SLZ file")
+                    .help("List information about the TOA file")
                     .short('l')
                     .long("list")
                     .action(clap::ArgAction::SetTrue),
@@ -82,7 +82,7 @@ impl Cli {
             )
             .arg(
                 Arg::new("output")
-                    .help("Output file path (defaults to input + .slz for compression, or input without .slz for extraction)")
+                    .help("Output file path (defaults to input + .toa for compression, or input without .toa for extraction)")
                     .short('o')
                     .long("output")
                     .value_name("FILE"),
@@ -399,7 +399,7 @@ fn main() -> Result<()> {
     } else if cli.extract {
         // Extraction mode.
         let output_filename = cli.output.clone().unwrap_or_else(|| {
-            if cli.input.ends_with(".slz") {
+            if cli.input.ends_with(".toa") {
                 cli.input[..cli.input.len() - 4].to_string()
             } else {
                 format!("{}.extracted", cli.input)
@@ -446,7 +446,7 @@ fn main() -> Result<()> {
         let output_filename = cli
             .output
             .clone()
-            .unwrap_or_else(|| format!("{}.slz", cli.input));
+            .unwrap_or_else(|| format!("{}.toa", cli.input));
 
         let (uncompressed_size, compressed_size, elapsed) =
             match compress_file(&cli, &output_filename) {

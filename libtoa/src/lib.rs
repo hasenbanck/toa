@@ -1,27 +1,12 @@
-//! # Streaming-LZMA (SLZ) Compression
+//! # TOA Compression File Format
 //!
-//! Implementation of an experimental compression file format using LZMA optimized for streaming and
-//! parallel processing.
+//! This project implements the **TOA compression file format**, an experimental compression format
+//! designed for streaming operation, parallel processing, and corruption resilience. The format
+//! uses LZMA as the primary compression algorithm with BLAKE3 cryptographic hashing and
+//! Reed-Solomon error correction codes.
 //!
-//! **Note: The SLZ format is currently in draft mode (v0.3) and not yet frozen. The specification
-//! may change in future
-//! versions.**
-//!
-//! ## Overview
-//!
-//! SLZ (Streaming-LZMA) is designed for scenarios where traditional compression formats fall short.
-//! The format provides:
-//!
-//! - **Streaming operation**: Read data sequentially without seeks, random access or buffering
-//!   (Writing needs buffering)
-//! - **Parallel processing**: Independent blocks enable concurrent decompression for improved
-//!   performance
-//! - **Data integrity**: Blake3 hashing which is protected by error correction (Reed-Solomon)
-//!
-//! SLZ main selling point is its easily parallelization, especially when decompressing, and it's
-//! strong data protection by an innovative usage of a strong cryptographic hash function (blake3)
-//! and the elimination of false positives in the form of error correcting the content hash with
-//! the help of a Reed-Solomon error correction.
+//! **Note: The TOA format is currently in draft mode (v0.7) and not yet frozen. The specification
+//! may change in future versions.**
 //!
 //! ## Acknowledgement
 //!
@@ -61,18 +46,18 @@ pub(crate) use std::io::Read;
 pub(crate) use std::io::Write;
 
 pub use cv_stack::CVStack;
-pub use header::{SLZBlockHeader, SLZHeader};
+pub use header::{TOABlockHeader, TOAHeader};
 pub use lzma::optimized_reader;
-pub use metadata::SLZMetadata;
+pub use metadata::TOAMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;
 #[cfg(not(feature = "std"))]
 pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
-pub use reader::SLZStreamingReader;
-pub use trailer::SLZFileTrailer;
-pub use writer::{SLZOptions, SLZStreamingWriter};
+pub use reader::TOAStreamingReader;
+pub use trailer::TOAFileTrailer;
+pub use writer::{TOAOptions, TOAStreamingWriter};
 
 /// Result type of the crate.
 #[cfg(feature = "std")]
@@ -82,9 +67,9 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[cfg(not(feature = "std"))]
 pub type Result<T> = core::result::Result<T, Error>;
 
-const SLZ_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
+const TOA_MAGIC: [u8; 4] = [0xFE, 0xDC, 0xBA, 0x98];
 
-const SLZ_VERSION: u8 = 0x01;
+const TOA_VERSION: u8 = 0x01;
 
 /// Reed-Solomon error correction levels for data protection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

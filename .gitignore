@@ -3,8 +3,8 @@
 /tests/data/*.tar
 /tests/data/*.xz
 /tests/data/*.lz
-/tests/data/*.slz
+/tests/data/*.toa
 /tests/data/*.iso
 /tests/data/*.exe
-slz
+toa
 *.exe

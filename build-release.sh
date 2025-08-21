@@ -31,7 +31,7 @@ OS=$(uname -s)
 ARCH=$(uname -m)
 
 TARGET_DIR="target"
-BINARY_NAME="slz"
+BINARY_NAME="toa"
 EXT=""
 
 case "$OS-$ARCH" in
@@ -60,9 +60,9 @@ esac
 TARGET_SPECIFIC="$TARGET_DIR/$RUST_TARGET/release"
 BIN="$TARGET_SPECIFIC/$BINARY_NAME$EXT"
 
-# Step 4: Run compression and decompression to create a PGO profile (block size = 2^^26 64 MiB).
+# Step 4: Run compression and decompression to create a PGO profile (block size = 2**26 64 MiB).
 "$BIN" --preset 7 --block-size=26 --keep "$KERNEL_TAR"
-"$BIN" --decompress --keep "$KERNEL_TAR.slz"
+"$BIN" --decompress --keep "$KERNEL_TAR.toa"
 
 # Step 5: Optimize with PGO
 cargo pgo optimize

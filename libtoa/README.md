@@ -1,6 +1,6 @@
-# libslz
+# libtoa
 
-Library to compress & decompress Streaming LZMA files (.slz).
+Library to compress & decompress TOA files (.toa).
 
 ## Acknowledgement
 

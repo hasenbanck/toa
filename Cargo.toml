@@ -1,5 +1,5 @@
 [workspace]
-members = ["libslz"]
+members = ["libtoa"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -8,22 +8,22 @@ blake3 = { version = "1" }
 hex-literal = "1"
 
 [package]
-name = "slz"
-description = "Streaming LZMA compression command-line tool"
+name = "toa"
+description = "TOA file compression command-line tool"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
-homepage = "https://github.com/hasenbanck/slz/"
-repository = "https://github.com/hasenbanck/slz/"
+homepage = "https://github.com/hasenbanck/toa/"
+repository = "https://github.com/hasenbanck/toa/"
 license = "Apache-2.0"
 version = "0.1.0"
-keywords = ["lzma", "slz", "compression"]
+keywords = ["lzma", "toa", "compression"]
 edition = "2024"
 rust-version = "1.89"
 exclude = ["tests/data/"]
 
 [[bin]]
-name = "slz"
+name = "toa"
 path = "src/main.rs"
 
 [dependencies]
-libslz = { version = "0.1", features = ["std"], path = "libslz" }
+libtoa = { version = "0.1", features = ["std"], path = "libtoa" }
 clap = { workspace = true }

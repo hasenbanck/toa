@@ -3,12 +3,12 @@ use alloc::vec::Vec;
 use blake3::hazmat::HasherExt;
 
 use crate::{
-    Prefilter, Result, SLZOptions, Write,
+    Prefilter, Result, TOAOptions, Write,
     cv_stack::CVStack,
     error_invalid_data,
-    header::{SLZBlockHeader, SLZHeader},
+    header::{TOABlockHeader, TOAHeader},
     lzma::{LZMAOptions, LZMAWriter, filter::bcj::BCJWriter},
-    trailer::SLZFileTrailer,
+    trailer::TOAFileTrailer,
     writer::ecc_writer::ECCWriter,
 };
 
@@ -58,7 +58,7 @@ impl Write for Writer {
 
 impl Writer {
     /// Create a new writer chain based on the options.
-    fn new(options: &SLZOptions, buffer: Vec<u8>) -> Result<Self> {
+    fn new(options: &TOAOptions, buffer: Vec<u8>) -> Result<Self> {
         let ecc_writer = ECCWriter::new(buffer, options.error_correction);
 
         let lzma_writer = LZMAWriter::new_no_header(
@@ -112,11 +112,11 @@ impl Writer {
     }
 }
 
-/// A single-threaded streaming SLZ compressor.
-pub struct SLZStreamingWriter<W> {
+/// A single-threaded streaming TOA compressor.
+pub struct TOAStreamingWriter<W> {
     inner: W,
     writer: Option<Writer>,
-    options: SLZOptions,
+    options: TOAOptions,
     header_written: bool,
     current_block_uncompressed_size: u64,
     current_block_hasher: blake3::Hasher,
@@ -125,9 +125,9 @@ pub struct SLZStreamingWriter<W> {
     compressed_size: u64,
 }
 
-impl<W: Write> SLZStreamingWriter<W> {
-    /// Create a new SLZ writer with the given options.
-    pub fn new(inner: W, options: SLZOptions) -> Self {
+impl<W: Write> TOAStreamingWriter<W> {
+    /// Create a new TOA writer with the given options.
+    pub fn new(inner: W, options: TOAOptions) -> Self {
         Self {
             inner,
             writer: None,
@@ -146,7 +146,7 @@ impl<W: Write> SLZStreamingWriter<W> {
             return Ok(());
         }
 
-        let header = SLZHeader::from_options(&self.options);
+        let header = TOAHeader::from_options(&self.options);
         header.write(&mut self.inner)?;
 
         self.header_written = true;
@@ -195,7 +195,7 @@ impl<W: Write> SLZStreamingWriter<W> {
             self.cv_stack
                 .add_chunk_chaining_value(hash_value, is_final_block);
 
-            let header = SLZBlockHeader::new(compressed_size as u64, is_partial_block, hash_value);
+            let header = TOABlockHeader::new(compressed_size as u64, is_partial_block, hash_value);
             header.write(&mut self.inner)?;
 
             self.inner.write_all(&compressed_data)?;
@@ -213,7 +213,7 @@ impl<W: Write> SLZStreamingWriter<W> {
         let root_hash = self.cv_stack.finalize();
         self.cv_stack.reset();
 
-        let trailer = SLZFileTrailer::new(self.uncompressed_size, root_hash);
+        let trailer = TOAFileTrailer::new(self.uncompressed_size, root_hash);
         trailer.write(&mut self.inner)
     }
 
@@ -222,7 +222,7 @@ impl<W: Write> SLZStreamingWriter<W> {
         self.inner
     }
 
-    /// Finish writing the SLZ stream.
+    /// Finish writing the TOA stream.
     pub fn finish(mut self) -> Result<W> {
         if !self.header_written {
             self.write_header()?;
@@ -230,7 +230,7 @@ impl<W: Write> SLZStreamingWriter<W> {
 
         if let Some(counting_writer) = self.writer.take() {
             // Determine if this is a partial block based on the block size.
-            let header = SLZHeader::from_options(&self.options);
+            let header = TOAHeader::from_options(&self.options);
             let is_partial_block = self.current_block_uncompressed_size < header.block_size();
             self.finish_current_block(counting_writer, true, is_partial_block)?;
         }
@@ -241,7 +241,7 @@ impl<W: Write> SLZStreamingWriter<W> {
     }
 }
 
-impl<W: Write> Write for SLZStreamingWriter<W> {
+impl<W: Write> Write for TOAStreamingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -319,24 +319,25 @@ mod tests {
 
     // Specification: Appendix A.1 Minimal File
     #[test]
-    fn test_slz_writer_empty() {
-        let expected_compressed: [u8; 98] = hex!(
-            "fedcba980100003e5d105dfece87d497a9afa78c
-             dc1461ce4fe539745f931a9db6b9000000000000
-             0080af1349b9f5f9a1a6a0404dea36dcc9499bcb
-             25c9adc112b7cc9a93cae41f32622d4fd07c37b7
-             257fe5617d81e7e8a3acb074f24a22f266ac"
+    fn test_toa_writer_empty() {
+        let expected_compressed: [u8; 96] = hex!(
+            "fedcba980100003e5d10a41b4946bc0d
+             b0d277d8f82b4b630fbc97d7615530a9
+             8000000000000000af1349b9f5f9a1a6
+             a0404dea36dcc9499bcb25c9adc112b7
+             cc9a93cae41f3262a2b54a54b5f88a30
+             271d41dceb661a679fbd77edc3f9040a"
         );
-        let expected_header_rs_parity: [u8; 24] =
-            hex!("5dfece87d497a9afa78cdc1461ce4fe539745f931a9db6b9");
+        let expected_header_rs_parity: [u8; 22] =
+            hex!("a41b4946bc0db0d277d8f82b4b630fbc97d7615530a9");
         let expected_trailer_blake_hash: [u8; 32] =
             hex!("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
         let expected_trailer_rs_parity: [u8; 24] =
-            hex!("2d4fd07c37b7257fe5617d81e7e8a3acb074f24a22f266ac");
+            hex!("a2b54a54b5f88a30271d41dceb661a679fbd77edc3f9040a");
 
         let mut buffer = Vec::new();
 
-        let options = SLZOptions {
+        let options = TOAOptions {
             prefilter: Prefilter::None,
             dictionary_size_log2: 16,
             lc: 3,
@@ -346,12 +347,12 @@ mod tests {
             ..Default::default()
         };
 
-        let writer = SLZStreamingWriter::new(Cursor::new(&mut buffer), options);
+        let writer = TOAStreamingWriter::new(Cursor::new(&mut buffer), options);
         let _ = writer.finish().unwrap();
 
-        assert_eq!(buffer.len(), 98, "Total file size should be 98 bytes");
+        assert_eq!(buffer.len(), 96, "Total file size should be 96 bytes");
 
-        let (header, trailer) = buffer.split_at(34);
+        let (header, trailer) = buffer.split_at(32);
         let (header, header_parity) = header.split_at(10);
 
         assert_eq!(header[0], 0xFE, "Magic byte 0");
@@ -371,7 +372,7 @@ mod tests {
         assert_eq!(trailer.len(), 64, "Trailer should be exactly 64 bytes");
 
         let size_bytes = &trailer[0..8];
-        let size_value = u64::from_le_bytes([
+        let size_value = u64::from_be_bytes([
             size_bytes[0],
             size_bytes[1],
             size_bytes[2],
@@ -403,28 +404,30 @@ mod tests {
 
     // Specification: Appendix A.1 Minimal File
     #[test]
-    fn test_slz_writer_zero_byte() {
-        let expected_compressed: [u8; 173] = hex!(
-            "fedcba980100011f5d1e 594220ca22eda2e406c
-             46d7fc3f07a2a974d5136eebdadfa0b000000000
-             000402d3adedff11b61f14c886e35afa036736dc
-             d87a74d27b5c1510225d0f592e213e82fafd5acd
-             f4327b2bd4c3f26af861437d52dde78e034b0000
-             041fef7ffffe000800001000000000000802d3ad
-             edff11b61f14c886e35afa036736dcd87a74d27b
-             5c1510225d0f592e213693139d8319b96f905900
-             70ba721f06c27e8acea54d2af03"
+    fn test_toa_writer_zero_byte() {
+        let expected_compressed: [u8; 171] = hex!(
+            "fedcba980100011f5d1e884b0ed50069
+             d44c9ae6faa030510e67da670b3259a2
+             400000000000000b2d3adedff11b61f1
+             4c886e35afa036736dcd87a74d27b5c1
+             510225d0f592e21320fe0ef111f7500f
+             a4207a02281c71866fb1ec323892b227
+             000041fef7ffffe00080008000000000
+             0000012d3adedff11b61f14c886e35af
+             a036736dcd87a74d27b5c1510225d0f5
+             92e2137e40e16f84c3e6a17e3c65da1f
+             2c61ddd66d5f4a662c32b9"
         );
-        let expected_header_rs_parity: [u8; 24] =
-            hex!("594220ca22eda2e406c46d7fc3f07a2a974d5136eebdadfa");
+        let expected_header_rs_parity: [u8; 22] =
+            hex!("884b0ed50069d44c9ae6faa030510e67da670b3259a2");
         let expected_trailer_blake_hash: [u8; 32] =
             hex!("2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213");
         let expected_trailer_rs_parity: [u8; 24] =
-            hex!("693139d8319b96f90590070ba721f06c27e8acea54d2af03");
+            hex!("7e40e16f84c3e6a17e3c65da1f2c61ddd66d5f4a662c32b9");
 
         let mut buffer = Vec::new();
 
-        let options = SLZOptions {
+        let options = TOAOptions {
             prefilter: Prefilter::BcjX86,
             dictionary_size_log2: 30,
             lc: 3,
@@ -434,13 +437,13 @@ mod tests {
             ..Default::default()
         };
 
-        let mut writer = SLZStreamingWriter::new(Cursor::new(&mut buffer), options);
+        let mut writer = TOAStreamingWriter::new(Cursor::new(&mut buffer), options);
         writer.write_all(&[0x00]).unwrap();
         let _ = writer.finish().unwrap();
 
-        assert_eq!(buffer.len(), 173, "Total file size should be 173 bytes");
+        assert_eq!(buffer.len(), 171, "Total file size should be 171 bytes");
 
-        let (header, rest) = buffer.split_at(34);
+        let (header, rest) = buffer.split_at(32);
         let (header, header_parity) = header.split_at(10);
 
         assert_eq!(header[0], 0xFE, "Magic byte 0");
@@ -459,7 +462,7 @@ mod tests {
 
         let (block_header_section, after_block_header) = rest.split_at(64);
 
-        let physical_size_with_flags = u64::from_le_bytes([
+        let physical_size_with_flags = u64::from_be_bytes([
             block_header_section[0],
             block_header_section[1],
             block_header_section[2],
@@ -496,7 +499,7 @@ mod tests {
 
         assert_eq!(trailer.len(), 64, "Trailer should be exactly 64 bytes");
 
-        let trailer_size_with_flag = u64::from_le_bytes([
+        let trailer_size_with_flag = u64::from_be_bytes([
             trailer[0], trailer[1], trailer[2], trailer[3], trailer[4], trailer[5], trailer[6],
             trailer[7],
         ]);
@@ -520,34 +523,34 @@ mod tests {
         assert_eq!(buffer.as_slice(), expected_compressed);
     }
 
-    fn test_slz_writer_with_error_correction(
+    fn test_toa_writer_with_error_correction(
         ecc_level: ErrorCorrection,
         expected_capability_bits: u8,
         decode_fn: fn(&mut [u8; 255]) -> Result<bool>,
     ) {
         let mut output = Vec::new();
 
-        let options = SLZOptions::from_preset(3)
+        let options = TOAOptions::from_preset(3)
             .with_error_correction(ecc_level)
             .with_block_size_exponent(Some(16));
 
-        let mut writer = SLZStreamingWriter::new(&mut output, options);
+        let mut writer = TOAStreamingWriter::new(&mut output, options);
 
-        let test_data = b"Hello, SLZ with Reed-Solomon error correction!";
+        let test_data = b"Hello, TOA with Reed-Solomon error correction!";
         writer.write_all(test_data).unwrap();
 
         writer.finish().unwrap();
 
-        // 1. SLZ header (34 bytes)
+        // 1. TOA header (32 bytes)
         // 2. Block header (64 bytes)
         // 3. Reed-Solomon encoded compressed data (255 bytes)
         // 4. Final trailer (64 bytes)
-        assert_eq!(output.len(), 34 + 64 + 255 + 64);
+        assert_eq!(output.len(), 32 + 64 + 255 + 64);
 
         let capabilities = output[5];
         assert_eq!(capabilities & 0b11, expected_capability_bits);
 
-        let codeword_start = 34 + 64; // After header + block header
+        let codeword_start = 32 + 64; // After header + block header
         let codeword = &output[codeword_start..codeword_start + 255];
 
         let mut codeword_copy = [0u8; 255];
@@ -560,8 +563,8 @@ mod tests {
     }
 
     #[test]
-    fn test_slz_writer_with_light_error_correction() {
-        test_slz_writer_with_error_correction(
+    fn test_toa_writer_with_light_error_correction() {
+        test_toa_writer_with_error_correction(
             ErrorCorrection::Light,
             0b01,
             reed_solomon::code_255_239::decode,
@@ -569,8 +572,8 @@ mod tests {
     }
 
     #[test]
-    fn test_slz_writer_with_medium_error_correction() {
-        test_slz_writer_with_error_correction(
+    fn test_toa_writer_with_medium_error_correction() {
+        test_toa_writer_with_error_correction(
             ErrorCorrection::Medium,
             0b10,
             reed_solomon::code_255_223::decode,
@@ -578,8 +581,8 @@ mod tests {
     }
 
     #[test]
-    fn test_slz_writer_with_heavy_error_correction() {
-        test_slz_writer_with_error_correction(
+    fn test_toa_writer_with_heavy_error_correction() {
+        test_toa_writer_with_error_correction(
             ErrorCorrection::Heavy,
             0b11,
             reed_solomon::code_255_191::decode,

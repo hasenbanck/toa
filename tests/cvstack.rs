@@ -1,27 +1,27 @@
 use std::io::{Read, Write};
 
-use libslz::{
-    SLZFileTrailer, SLZOptions, SLZStreamingReader, SLZStreamingWriter,
+use libtoa::{
+    TOAFileTrailer, TOAOptions, TOAStreamingReader, TOAStreamingWriter,
     optimized_reader::SliceReader,
 };
 
-fn compress_and_get_slz_hash(
+fn compress_and_get_toa_hash(
     data: &[u8],
     block_size: u8,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let block_size_exp = block_size + 10;
-    let options = SLZOptions::from_preset(3).with_block_size_exponent(Some(block_size_exp));
+    let options = TOAOptions::from_preset(3).with_block_size_exponent(Some(block_size_exp));
 
     let mut compressed_data = Vec::new();
     {
-        let mut writer = SLZStreamingWriter::new(&mut compressed_data, options);
+        let mut writer = TOAStreamingWriter::new(&mut compressed_data, options);
         writer.write_all(data)?;
         writer.finish()?;
     }
 
     {
         let mut uncompressed_data = Vec::new();
-        let mut reader = SLZStreamingReader::new(SliceReader::new(compressed_data.as_ref()), true);
+        let mut reader = TOAStreamingReader::new(SliceReader::new(compressed_data.as_ref()), true);
         reader.read_to_end(&mut uncompressed_data)?;
         assert_eq!(uncompressed_data.as_slice(), data);
     }
@@ -30,7 +30,7 @@ fn compress_and_get_slz_hash(
     let trailer_start = compressed_data.len() - 64;
     trailer_array.copy_from_slice(&compressed_data[trailer_start..]);
 
-    let trailer = SLZFileTrailer::parse(&trailer_array, false)?;
+    let trailer = TOAFileTrailer::parse(&trailer_array, false)?;
     let hash_bytes = trailer.blake3_hash();
 
     let hash_hex = hash_bytes
@@ -46,11 +46,11 @@ fn test_block_count_case(expected_hash: &str, file_size: usize, block_size: u8, 
     let data = vec![pattern; file_size];
 
     let actual_hash =
-        compress_and_get_slz_hash(&data, block_size).expect("SLZ compression should succeed");
+        compress_and_get_toa_hash(&data, block_size).expect("TOA compression should succeed");
 
     assert_eq!(
         actual_hash, expected_hash,
-        "Hash mismatch - SLZ: {}, expected: {}",
+        "Hash mismatch - TOA: {}, expected: {}",
         actual_hash, expected_hash
     );
 }

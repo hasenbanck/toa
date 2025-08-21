@@ -1,7 +1,7 @@
 mod ecc_reader;
 mod streaming_reader;
 
-pub use streaming_reader::SLZStreamingReader;
+pub use streaming_reader::TOAStreamingReader;
 
 use crate::{
     ErrorCorrection, Prefilter, Read, Result,

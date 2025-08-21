@@ -2,19 +2,19 @@ use super::{Write, error_invalid_data, reed_solomon::code_64_40};
 
 /// File trailer containing total uncompressed size, root hash, and Reed-Solomon parity.
 #[derive(Debug, Clone, Copy)]
-pub struct SLZFileTrailer {
+pub struct TOAFileTrailer {
     total_uncompressed_size_with_flags: u64,
     blake3_hash: [u8; 32],
     rs_parity: [u8; 24],
 }
 
-impl SLZFileTrailer {
+impl TOAFileTrailer {
     /// Create a new file trailer.
     pub fn new(total_uncompressed_size: u64, blake3_hash: [u8; 32]) -> Self {
         let total_uncompressed_size_with_flags = total_uncompressed_size | (1u64 << 63);
 
         let mut payload = [0u8; 40];
-        payload[..8].copy_from_slice(&total_uncompressed_size_with_flags.to_le_bytes());
+        payload[..8].copy_from_slice(&total_uncompressed_size_with_flags.to_be_bytes());
         payload[8..].copy_from_slice(&blake3_hash);
         let rs_parity = code_64_40::encode(&payload);
         Self {
@@ -40,7 +40,7 @@ impl SLZFileTrailer {
     }
 
     /// Parse a file trailer from a buffer.
-    pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<SLZFileTrailer> {
+    pub fn parse(buffer: &[u8; 64], apply_rs_correction: bool) -> crate::Result<TOAFileTrailer> {
         let mut corrected_buffer = *buffer;
 
         if apply_rs_correction {
@@ -62,7 +62,7 @@ impl SLZFileTrailer {
             }
         }
 
-        let total_uncompressed_size_with_flags = u64::from_le_bytes([
+        let total_uncompressed_size_with_flags = u64::from_be_bytes([
             corrected_buffer[0],
             corrected_buffer[1],
             corrected_buffer[2],
@@ -79,7 +79,7 @@ impl SLZFileTrailer {
         let mut rs_parity = [0u8; 24];
         rs_parity.copy_from_slice(&corrected_buffer[40..64]);
 
-        Ok(SLZFileTrailer {
+        Ok(TOAFileTrailer {
             total_uncompressed_size_with_flags,
             blake3_hash,
             rs_parity,
@@ -89,7 +89,7 @@ impl SLZFileTrailer {
     /// Write the trailer to a writer.
     pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
         let mut trailer_bytes = [0u8; 64];
-        trailer_bytes[0..8].copy_from_slice(&self.total_uncompressed_size_with_flags.to_le_bytes());
+        trailer_bytes[0..8].copy_from_slice(&self.total_uncompressed_size_with_flags.to_be_bytes());
         trailer_bytes[8..40].copy_from_slice(&self.blake3_hash);
         trailer_bytes[40..64].copy_from_slice(&self.rs_parity);
 
@@ -106,14 +106,14 @@ mod tests {
         let total_size = 1_000_000;
         let blake3_hash = [42u8; 32];
 
-        let trailer = SLZFileTrailer::new(total_size, blake3_hash);
+        let trailer = TOAFileTrailer::new(total_size, blake3_hash);
 
         let mut buffer = Vec::new();
         trailer.write(&mut buffer).unwrap();
 
         let mut buffer_array = [0u8; 64];
         buffer_array.copy_from_slice(&buffer);
-        let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
+        let parsed_trailer = TOAFileTrailer::parse(&buffer_array, true).unwrap();
 
         assert_eq!(
             parsed_trailer.total_uncompressed_size(),
@@ -128,14 +128,14 @@ mod tests {
         let total_size = 0;
         let blake3_hash = [0u8; 32];
 
-        let trailer = SLZFileTrailer::new(total_size, blake3_hash);
+        let trailer = TOAFileTrailer::new(total_size, blake3_hash);
 
         let mut buffer = Vec::new();
         trailer.write(&mut buffer).unwrap();
 
         let mut buffer_array = [0u8; 64];
         buffer_array.copy_from_slice(&buffer);
-        let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
+        let parsed_trailer = TOAFileTrailer::parse(&buffer_array, true).unwrap();
 
         assert_eq!(parsed_trailer.total_uncompressed_size(), 0);
         assert_eq!(parsed_trailer.blake3_hash(), [0u8; 32]);
@@ -146,7 +146,7 @@ mod tests {
         let total_size = 1_000_000;
         let blake3_hash = [42u8; 32];
 
-        let trailer = SLZFileTrailer::new(total_size, blake3_hash);
+        let trailer = TOAFileTrailer::new(total_size, blake3_hash);
 
         let mut buffer = Vec::new();
         trailer.write(&mut buffer).unwrap();
@@ -156,7 +156,7 @@ mod tests {
 
         let mut buffer_array = [0u8; 64];
         buffer_array.copy_from_slice(&buffer);
-        let parsed_trailer = SLZFileTrailer::parse(&buffer_array, true).unwrap();
+        let parsed_trailer = TOAFileTrailer::parse(&buffer_array, true).unwrap();
 
         assert_eq!(parsed_trailer.total_uncompressed_size(), total_size);
         assert_eq!(parsed_trailer.blake3_hash(), blake3_hash);
@@ -167,7 +167,7 @@ mod tests {
         let total_size = 1_000_000;
         let blake3_hash = [42u8; 32];
 
-        let trailer = SLZFileTrailer::new(total_size, blake3_hash);
+        let trailer = TOAFileTrailer::new(total_size, blake3_hash);
 
         let mut buffer = Vec::new();
         trailer.write(&mut buffer).unwrap();
@@ -179,7 +179,7 @@ mod tests {
 
         let mut buffer_array = [0u8; 64];
         buffer_array.copy_from_slice(&buffer);
-        let result = SLZFileTrailer::parse(&buffer_array, true);
+        let result = TOAFileTrailer::parse(&buffer_array, true);
 
         assert!(result.is_err());
         assert!(
