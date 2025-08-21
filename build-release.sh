@@ -60,9 +60,15 @@ esac
 TARGET_SPECIFIC="$TARGET_DIR/$RUST_TARGET/release"
 BIN="$TARGET_SPECIFIC/$BINARY_NAME$EXT"
 
-# Step 4: Run compression and decompression to create a PGO profile (block size = 2**26 64 MiB).
+# Step 4: Run compression and decompression to create a PGO profile
 "$BIN" --preset 7 --block-size=26 --keep "$KERNEL_TAR"
 "$BIN" --decompress --keep "$KERNEL_TAR.toa"
+"$BIN" --preset 2 --ecc light --keep tests/data/executable.exe
+"$BIN" --decompress --keep tests/data/executable.exe.toa
+"$BIN" --preset 3 --ecc medium --keep tests/data/executable.exe
+"$BIN" --decompress --keep tests/data/executable.exe.toa
+"$BIN" --preset 4 --ecc heavy --keep tests/data/executable.exe
+"$BIN" --decompress --keep tests/data/executable.exe.toa
 
 # Step 5: Optimize with PGO
 cargo pgo optimize
