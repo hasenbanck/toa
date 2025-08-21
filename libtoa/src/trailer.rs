@@ -173,8 +173,8 @@ mod tests {
         trailer.write(&mut buffer).unwrap();
 
         // Introduce too many errors (beyond Reed-Solomon correction capability).
-        for i in 0..20 {
-            buffer[i] = 0xFF;
+        for x in buffer[0..20].iter_mut() {
+            *x = 0xFF;
         }
 
         let mut buffer_array = [0u8; 64];

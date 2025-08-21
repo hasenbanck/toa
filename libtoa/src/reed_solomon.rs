@@ -208,12 +208,12 @@ mod primitives {
             return;
         }
         let mut l = len - 1;
-        for i in 0..l {
+        for (i, out_item) in out.iter_mut().enumerate().take(l) {
             let idx = i + 1;
             if (idx & 1) == 1 {
-                out[i] = poly[idx];
+                *out_item = poly[idx];
             } else {
-                out[i] = 0;
+                *out_item = 0;
             }
         }
         while l > 1 && out[l - 1] == 0 {
@@ -318,10 +318,10 @@ mod primitives {
 
         let mut x = 1u8;
         let alpha = gf_alpha_pow(1); // which is 2
-        for i in 0..PARITY_LEN {
+        for syndrome_item in syndrome.iter_mut().take(PARITY_LEN) {
             x = gf_mul(x, alpha); // x = α^(i+1)
             let s = poly_eval(c, CODEWORD_SIZE, x);
-            syndrome[i] = s;
+            *syndrome_item = s;
             if s != 0 {
                 all_zero = false;
             }
@@ -1055,8 +1055,8 @@ pub(crate) mod code_64_40 {
         fn test_encode_decode_no_errors() {
             let mut data = [0u8; DATA_LEN];
 
-            for i in 0..DATA_LEN {
-                data[i] = i as u8;
+            for (i, data_item) in data.iter_mut().enumerate().take(DATA_LEN) {
+                *data_item = i as u8;
             }
 
             let parity = encode(&data);
@@ -1076,8 +1076,8 @@ pub(crate) mod code_64_40 {
             for _ in 0..20 {
                 let mut data = [0u8; DATA_LEN];
 
-                for i in 0..DATA_LEN {
-                    data[i] = rng.next_u8();
+                for data_item in data.iter_mut().take(DATA_LEN) {
+                    *data_item = rng.next_u8();
                 }
 
                 let parity = encode(&data);
@@ -1093,8 +1093,8 @@ pub(crate) mod code_64_40 {
                 while count < errors {
                     let p = rng.next_usize(CODEWORD_SIZE);
                     let mut unique = true;
-                    for j in 0..count {
-                        if positions[j] == p {
+                    for position_item in positions.iter().take(count) {
+                        if *position_item == p {
                             unique = false;
                             break;
                         }
@@ -1105,8 +1105,8 @@ pub(crate) mod code_64_40 {
                     }
                 }
 
-                for i in 0..count {
-                    let p = positions[i];
+                for position_item in positions.iter().take(count) {
+                    let p = *position_item;
                     let mut v = rng.next_u8();
                     if v == 0 {
                         v = 1;
@@ -1126,8 +1126,8 @@ pub(crate) mod code_64_40 {
 
             let mut data = [0u8; DATA_LEN];
 
-            for i in 0..DATA_LEN {
-                data[i] = rng.next_u8();
+            for data_item in data.iter_mut().take(DATA_LEN) {
+                *data_item = rng.next_u8();
             }
 
             let parity = encode(&data);
@@ -1142,8 +1142,8 @@ pub(crate) mod code_64_40 {
             while count < (PARITY_LEN / 2 + 1) {
                 let p = rng.next_usize(CODEWORD_SIZE);
                 let mut unique = true;
-                for j in 0..count {
-                    if positions[j] == p {
+                for position_item in positions.iter().take(count) {
+                    if *position_item == p {
                         unique = false;
                         break;
                     }
@@ -1154,8 +1154,8 @@ pub(crate) mod code_64_40 {
                 }
             }
 
-            for i in 0..count {
-                let p = positions[i];
+            for position_item in positions.iter().take(count) {
+                let p = *position_item;
                 let mut v = rng.next_u8();
                 if v == 0 {
                     v = 1;

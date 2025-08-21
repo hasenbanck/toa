@@ -41,6 +41,7 @@ impl<R: OptimizedReader> Read for Reader<R> {
 
 impl<R: OptimizedReader> Reader<R> {
     /// Create a new reader chain based on the header configuration.
+    #[allow(clippy::too_many_arguments)]
     fn new(
         reader: R,
         prefilter: Prefilter,

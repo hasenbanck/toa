@@ -153,8 +153,8 @@ mod tests {
 
         assert_eq!(&output[..test_data.len()], test_data);
 
-        for i in test_data.len()..239 {
-            assert_eq!(output[i], 0, "Padding should be zero at position {}", i);
+        for (i, &x) in output[test_data.len()..239].iter().enumerate() {
+            assert_eq!(x, 0, "Padding should be zero at position {i}");
         }
 
         assert_eq!(output[239..].len(), 16);
@@ -183,8 +183,11 @@ mod tests {
             &test_data[239..]
         );
 
-        for i in (255 + second_codeword_data_size)..(255 + 239) {
-            assert_eq!(output[i], 0, "Padding should be zero at position {}", i);
+        for (i, &x) in output[(255 + second_codeword_data_size)..(255 + 239)]
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(x, 0, "Padding should be zero at position {i}");
         }
     }
 }
