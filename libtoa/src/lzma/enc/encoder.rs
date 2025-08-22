@@ -3,15 +3,18 @@ use alloc::{vec, vec::Vec};
 use super::{
     ALIGN_BITS, ALIGN_MASK, ALIGN_SIZE, DIST_MODEL_END, DIST_MODEL_START, DIST_STATES,
     FULL_DISTANCES, LOW_SYMBOLS, LZMACoder, LengthCoder, LiteralCoder, LiteralSubCoder,
-    MATCH_LEN_MAX, MATCH_LEN_MIN, MID_SYMBOLS, REPS,
+    MATCH_LEN_MAX, MATCH_LEN_MIN, MID_SYMBOLS, REPS, Write,
     encoder_fast::FastEncoderMode,
     encoder_normal::NormalEncoderMode,
     get_dist_state,
     lz::{LZEncoder, MFType},
-    range_enc::RangeEncoder,
+    range_enc::{RangeEncoder, RangeEncoderBuffer},
     state::State,
 };
-use crate::Write;
+
+// TODO We could increase this to 4, but we need test data that compressed more than 2 MiB to 64 KiB!
+const LZMA2_UNCOMPRESSED_LIMIT: u32 = (2 << 20) - MATCH_LEN_MAX as u32;
+const LZMA2_COMPRESSED_LIMIT: u32 = (64 << 10) - 26;
 
 const DIST_PRICE_UPDATE_INTERVAL: u32 = FULL_DISTANCES as u32;
 const ALIGN_PRICE_UPDATE_INTERVAL: u32 = ALIGN_SIZE as u32;
@@ -198,6 +201,11 @@ impl LZMAEncoder {
         mode.reset();
     }
 
+    #[inline(always)]
+    pub(crate) fn reset_uncompressed_size(&mut self) {
+        self.data.uncompressed_size = 0;
+    }
+
     #[allow(unused)]
     pub(crate) fn encode_for_lzma1<W: Write>(
         &mut self,
@@ -225,6 +233,24 @@ impl LZMAEncoder {
         rc.encode_bit(&mut self.coder.is_rep, self.coder.state.get() as usize, 0)?;
         self.encode_match(u32::MAX, MATCH_LEN_MIN as u32, pos_state, rc)?;
         Ok(())
+    }
+
+    pub fn encode_for_lzma2(
+        &mut self,
+        rc: &mut RangeEncoder<RangeEncoderBuffer>,
+        mode: &mut dyn LZMAEncoderTrait,
+    ) -> crate::Result<bool> {
+        if !self.lz.is_started() && !self.encode_init(rc)? {
+            return Ok(false);
+        }
+        while self.data.uncompressed_size <= LZMA2_UNCOMPRESSED_LIMIT
+            && rc.get_pending_size() <= LZMA2_COMPRESSED_LIMIT
+        {
+            if !self.encode_symbol(rc, mode)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn encode_init<W: Write>(&mut self, rc: &mut RangeEncoder<W>) -> crate::Result<bool> {

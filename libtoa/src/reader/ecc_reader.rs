@@ -2,25 +2,24 @@ use alloc::vec::Vec;
 
 use crate::{
     ErrorCorrection, Read, Result, error_invalid_data,
-    lzma::optimized_reader::OptimizedReader,
     reed_solomon::{code_255_191, code_255_223, code_255_239},
 };
 
 type DecodeFunction<R> = fn(&mut ECCReader<R>, &mut [u8]) -> Result<usize>;
 
-fn decode_none<R: OptimizedReader>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
+fn decode_none<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
     reader.inner.read(buf)
 }
 
-fn decode_light<R: OptimizedReader>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
+fn decode_light<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
     reader.decode_with_rs::<_, 239>(buf, code_255_239::decode)
 }
 
-fn decode_medium<R: OptimizedReader>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
+fn decode_medium<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
     reader.decode_with_rs::<_, 223>(buf, code_255_223::decode)
 }
 
-fn decode_heavy<R: OptimizedReader>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
+fn decode_heavy<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
     reader.decode_with_rs::<_, 191>(buf, code_255_191::decode)
 }
 
@@ -35,7 +34,7 @@ pub(crate) struct ECCReader<R> {
     uses_buffer: bool,
 }
 
-impl<R: OptimizedReader> ECCReader<R> {
+impl<R: Read> ECCReader<R> {
     /// Create a new ECCReader with the specified error correction level.
     pub(crate) fn new(inner: R, error_correction: ErrorCorrection, validate_rs: bool) -> Self {
         let (decode_fn, uses_buffer) = match error_correction {
@@ -147,7 +146,7 @@ impl<R: OptimizedReader> ECCReader<R> {
     }
 }
 
-impl<R: OptimizedReader> Read for ECCReader<R> {
+impl<R: Read> Read for ECCReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if !self.uses_buffer {
             return self.inner.read(buf);
@@ -157,18 +156,14 @@ impl<R: OptimizedReader> Read for ECCReader<R> {
     }
 }
 
-impl<R: OptimizedReader> OptimizedReader for ECCReader<R> {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lzma::optimized_reader::SliceReader;
 
     #[test]
     fn test_ecc_reader_none_passthrough() {
         let test_data = b"Hello, World!";
-        let slice_reader = SliceReader::new(test_data);
-        let mut ecc_reader = ECCReader::new(slice_reader, ErrorCorrection::None, false);
+        let mut ecc_reader = ECCReader::new(test_data.as_slice(), ErrorCorrection::None, false);
 
         let mut output = vec![0u8; test_data.len()];
         let bytes_read = ecc_reader.read(&mut output).unwrap();

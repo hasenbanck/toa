@@ -9,14 +9,17 @@ pub(crate) mod decoder;
 pub(crate) mod enc;
 pub mod filter;
 pub(crate) mod lz;
-pub(crate) mod lzma_reader;
-pub mod optimized_reader;
+mod lzma2s_reader;
 pub(crate) mod range_dec;
 pub(crate) mod state;
 
-pub use enc::{EncodeMode, LZMAOptions, LZMAWriter};
+pub use enc::{EncodeMode, LZMA2sWriter, LZMAOptions};
+pub use lzma2s_reader::LZMA2sReader;
 
-use crate::lzma::state::{STATES, State};
+use crate::{
+    Read, Result, Write,
+    lzma::state::{STATES, State},
+};
 
 /// The maximal size of a dictionary.
 pub const DICT_SIZE_MAX: u32 = u32::MAX & !15_u32;
@@ -199,5 +202,38 @@ impl LengthCoder {
             init_probs(ele);
         }
         init_probs(&mut self.high);
+    }
+}
+
+trait ByteReader {
+    fn read_u8(&mut self) -> Result<u8>;
+
+    fn read_u32(&mut self) -> Result<u32>;
+}
+
+trait ByteWriter {
+    fn write_u8(&mut self, value: u8) -> Result<()>;
+}
+
+impl<T: Read> ByteReader for T {
+    #[inline(always)]
+    fn read_u8(&mut self) -> Result<u8> {
+        let mut buf = [0; 1];
+        self.read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+
+    #[inline(always)]
+    fn read_u32(&mut self) -> Result<u32> {
+        let mut buf = [0; 4];
+        self.read_exact(buf.as_mut())?;
+        Ok(u32::from_be_bytes(buf))
+    }
+}
+
+impl<T: Write> ByteWriter for T {
+    #[inline(always)]
+    fn write_u8(&mut self, value: u8) -> Result<()> {
+        self.write_all(&[value])
     }
 }

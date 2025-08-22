@@ -1,9 +1,6 @@
 use std::io::{Read, Write};
 
-use libtoa::{
-    TOAFileTrailer, TOAOptions, TOAStreamingReader, TOAStreamingWriter,
-    optimized_reader::SliceReader,
-};
+use libtoa::{TOAFileTrailer, TOAOptions, TOAStreamingReader, TOAStreamingWriter};
 
 fn compress_and_get_toa_hash(
     data: &[u8],
@@ -21,7 +18,7 @@ fn compress_and_get_toa_hash(
 
     {
         let mut uncompressed_data = Vec::new();
-        let mut reader = TOAStreamingReader::new(SliceReader::new(compressed_data.as_ref()), true);
+        let mut reader = TOAStreamingReader::new(compressed_data.as_slice(), true);
         reader.read_to_end(&mut uncompressed_data)?;
         assert_eq!(uncompressed_data.as_slice(), data);
     }

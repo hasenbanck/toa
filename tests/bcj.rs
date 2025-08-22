@@ -78,9 +78,7 @@ fn test_bcj_filter_roundtrip(
     let mut decompressed_data = Vec::new();
     {
         let cursor = Cursor::new(compressed_data_bcj);
-        let reader = libtoa::optimized_reader::BufferedReader::new(cursor)
-            .unwrap_or_else(|_| panic!("Failed to create buffered reader for {test_name}"));
-        let mut toa_reader = TOAStreamingReader::new(reader, true);
+        let mut toa_reader = TOAStreamingReader::new(cursor, true);
 
         let mut buffer = vec![0u8; 8192];
         loop {

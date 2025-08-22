@@ -1,14 +1,12 @@
 mod encoder;
 mod encoder_fast;
 mod encoder_normal;
-mod lzma_writer;
+mod lzma2s_writer;
 mod range_enc;
-
-use alloc::vec::Vec;
 
 pub use encoder::EncodeMode;
 use lz::MFType;
-pub use lzma_writer::*;
+pub use lzma2s_writer::*;
 
 use super::*;
 
@@ -31,8 +29,6 @@ pub struct LZMAOptions {
     pub mf: MFType,
     /// Match finder depth limit.
     pub depth_limit: i32,
-    /// Preset dictionary data.
-    pub preset_dict: Option<Vec<u8>>,
 }
 
 impl Default for LZMAOptions {
@@ -81,7 +77,6 @@ impl LZMAOptions {
             nice_len: Default::default(),
             mf: Default::default(),
             depth_limit: Default::default(),
-            preset_dict: Default::default(),
         };
         opt.set_preset(preset);
         opt
@@ -112,11 +107,5 @@ impl LZMAOptions {
             };
             self.depth_limit = 0;
         }
-    }
-
-    /// Returns the LZMA properties byte for these options.
-    #[inline(always)]
-    pub fn get_props(&self) -> u8 {
-        ((self.pb * 5 + self.lp) * 9 + self.lc) as u8
     }
 }

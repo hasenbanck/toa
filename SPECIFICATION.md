@@ -1,6 +1,6 @@
 # TOA File Format Specification
 
-Version 0.7
+Version 0.8
 
 ## 1. Introduction
 
@@ -8,8 +8,9 @@ Version 0.7
 
 This document specifies the TOA, a compression and archive format for compressed data designed with four fundamental
 capabilities at its core: streaming operation with parallel processing, corruption resilience through error correction,
-efficient append operations, and deep integration with BLAKE3's cryptographic tree structure. The format uses LZMA as
-the primary compression algorithm.
+efficient append operations, and deep integration with BLAKE3's cryptographic tree structure. The format uses LZMA2s,
+a simplified version of LZMA2, which can be easily added to any LZMA based encoder / decoder, as the primary compression
+algorithm.
 
 ### 1.2 Core Design Principles
 
@@ -76,7 +77,32 @@ Even with uncorrectable corruption in some blocks, other blocks remain recoverab
 - Multi-core: Recursive divide-and-conquer parallelization
 - Zero-buffer streaming: Decompression requires no buffering
 
-### 1.4 Conventions
+### 1.4 Compression Approach: LZMA2s
+
+TOA uses LZMA2s for compression, which is standard LZMA compression with a simplified framing layer. It's a simplified
+version of LZMA2, without its complex state management. This approach deserves explicit clarification:
+
+**LZMA2s is NOT a new compression algorithm.** It is standard LZMA compression with a simple chunking format. The actual
+compression and decompression logic is identical to LZMA, which has been proven reliable over 20+ years of use.
+
+The format adds only:
+
+- A framing structure to divide data into chunks
+- Control bytes to distinguish compressed from uncompressed chunks
+- An improved encoding of using delta encoding for the chunk sizes
+- Size limits that prevent worst-case expansion
+- A simple state reset rule when switching chunk types
+
+This design ensures:
+
+- **Patent safety**: Uses only the well-established, patent-free LZMA algorithm
+- **Implementation simplicity**: Any LZMA implementation can be adapted with ~100 lines of framing code
+- **Proven reliability**: Leverages decades of LZMA field-testing
+- **Catastrophic case handling**: Prevents expansion beyond original size through intelligent chunking
+
+The technical details of the LZMA2s framing format are specified in Section 4.1.3.
+
+### 1.5 Conventions
 
 The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "
 OPTIONAL" in this document are to be interpreted as described in RFC 2119.
@@ -239,7 +265,7 @@ Each block MUST be self-contained with the following structure:
 +---------------------+
 | Block Header (64)   |  Size, hash, and RS parity
 +---------------------+
-| Compressed Data     |  LZMA stream (optionally RS-protected)
+| Compressed Data     |  LZMA2s stream (optionally RS-protected)
 +---------------------+
 ```
 
@@ -270,15 +296,69 @@ structure identification.
 
 Each block MUST be completely independent:
 
-- LZMA encoder state MUST be reset for each block
+- LZMA2s encoder state MUST be reset for each block
 - Prefilters (if used) MUST be reset for each block
 - Each block MUST be decompressible in isolation
 - Each block MUST be independently verifiable
 
 #### 4.1.3 Compressed Data
 
-The compressed data MUST be a raw LZMA stream with end-of-stream marker (the distance-length pair MUST be 0xFFFFFFFF,
-2).
+The compressed data MUST be an LZMA2s stream. LZMA2s is a simplified variant of LZMA2 optimized for TOA's use case.
+
+##### 4.1.3.1 LZMA2s Stream Format
+
+An LZMA2s stream consists of a sequence of chunks, each beginning with a control byte that determines the chunk type and
+size. The stream MUST end with a control byte value of 0x00.
+
+##### 4.1.3.2 Control Byte Encoding
+
+The control byte uses the following encoding:
+
+**End of Stream**: `0x00`
+
+- Indicates end of the LZMA2s stream
+- No additional bytes follow.
+
+**Uncompressed Chunk**: `001sssss` + 2 bytes
+
+- Bits 7-5: `001` identifies uncompressed chunk
+- Bits 4-0: High 5 bits of 21-bit size
+- Following 2 bytes: Middle and low bytes of size
+- Actual size = encoded_size + 1
+
+**Compressed Chunk**: `010uuuuu` + 4 bytes
+
+- Bits 7-5: `010` identifies compressed chunk
+- Bits 4-0: High 5 bits of 21-bit uncompressed size
+- Following 2 bytes: Middle and low bytes of uncompressed size
+- Following 2 bytes: 16-bit compressed size
+- Actual sizes = encoded_size + 1
+
+**Delta Compressed Chunk**: `011uuuuu` + 3 bytes
+
+- Bits 7-5: `011` identifies delta compressed chunk
+- Bits 4-0: High 5 bits of 21-bit uncompressed size
+- Following 2 bytes: Middle and low bytes of uncompressed size
+- Following 1 byte: Delta from 65536
+- Compressed size = 65536 - delta
+
+**Delta Uncompressed Chunk**: `1sdddddd` + 1 byte
+
+- Bit 7: `1` identifies delta uncompressed
+- Bit 6: Sign (0=add to 65536, 1=subtract from 65536)
+- Bits 5-0: High 6 bits of 14-bit delta
+- Following 1 byte: Low 8 bits of delta
+- Size = 65536 ± delta (range: 49,152 to 81,920 bytes)
+
+##### 4.1.3.3 State Management
+
+LZMA2s maintains simpler state than LZMA2:
+
+- Properties (lc, lp, pb) remain constant throughout the stream
+- Dictionary size remains constant throughout the stream
+- The LZMA decoder state MUST be reset only when transitioning from an uncompressed chunk to a compressed chunk
+
+This simplified state management reduces implementation complexity while maintaining compression efficiency.
 
 ### 4.2 BLAKE3 Tree Integration
 
@@ -527,25 +607,30 @@ stems from BLAKE3's design for parallel processing and its efficient use of mode
 The choice of BLAKE3 transforms the format from a simple compression container into a cryptographically secure,
 parallelizable system suitable for modern distributed and untrusted environments.
 
-### 10.2 LZMA over LZMA2
+### 10.2 LZMA2s over LZMA or LZMA2
 
-**Criticism**: Why use LZMA instead of its successor LZMA2, which adds features like uncompressed chunks and better
-streaming support?
+**Criticism**: Why create a custom compression variant instead of using standard LZMA or LZMA2?
 
-**Rationale**: Empirical testing across diverse datasets revealed that LZMA consistently outperforms LZMA2 in our
-format:
+**Rationale**: LZMA2s was developed to address specific limitations discovered during empirical testing:
 
-**Compression Efficiency**: Across test data including Linux kernel sources, executables, and multimedia files, LZMA
-produced consistently smaller output than LZMA2. The overhead from LZMA2's chunk headers and control bytes negates its
-theoretical advantages in our already-chunked design.
+**Catastrophic Worst-Case Handling**: Pure LZMA can expand incompressible data beyond original size. While LZMA2 solves
+this, it adds unnecessary complexity for TOA's use case.
 
-**Redundant Feature**: LZMA2's other advantage - the memory-bounded operation - is already provided by our block
-structure. Each TOA block is independently compressed with reset state, achieving the same benefits without
-LZMA2's overhead.
+**Lack of Formal Specification**: LZMA2 has no formal specification—it's defined by its reference implementation. Since
+TOA requires a complete specification anyway, we can optimize the format.
 
-**Simplicity**: LZMA's simpler structure reduces implementation complexity. The end-of-stream marker (0xFFFFFFFF, 2)
-provides clean termination even with Reed-Solomon padding, while LZMA2's multi-chunk structure would complicate our RS
-codeword alignment.
+**Simplified State Management**: LZMA2s only resets state when transitioning from uncompressed to compressed chunks.
+LZMA2's complex state machine with property changes and dictionary resets is unnecessary when TOA already provides
+block-level resets.
+
+**Improved Efficiency**: Delta encoding for common chunk sizes (around 64KiB) saves 1 byte per chunk. For typical files
+with many chunks, this provides measurable compression improvements.
+
+**Minimal Implementation Changes**: LZMA2s only changes the control byte encoding—the underlying LZMA compression is
+identical. This makes it easy to adapt existing LZMA and LZMA2 implementations.
+
+The simplifications in LZMA2s align perfectly with TOA's design philosophy: maintaining simplicity while improving
+efficiency, with changes minimal enough to be practical for upstream contribution.
 
 ### 10.3 Big-Endian over Little-Endian
 
@@ -960,6 +1045,7 @@ Files using this format SHOULD use the extension `.toa`.
 
 ## Revision History
 
+- Version 0.8  (2025-08-22): Spitched from LZMA to LZMA2s for better worst case performance.
 - Version 0.7 (2025-08-21): Update name and some refinements:
     - Changed integer layout from little-endian to big-endian.
     - Changed header size from 34 to 32 bytes to be aligned to 8 bytes.

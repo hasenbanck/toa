@@ -3,7 +3,7 @@ use blake3::hazmat::HasherExt;
 use super::Reader;
 use crate::{
     Read, Result, TOAHeader, cv_stack::CVStack, error_invalid_data, header::TOABlockHeader,
-    lzma::optimized_reader::OptimizedReader, trailer::TOAFileTrailer,
+    trailer::TOAFileTrailer,
 };
 
 /// A single-threaded streaming TOA decompressor.
@@ -29,7 +29,7 @@ pub struct TOAStreamingReader<R> {
     partial_block_msb_set: bool,
 }
 
-impl<R: OptimizedReader> TOAStreamingReader<R> {
+impl<R: Read> TOAStreamingReader<R> {
     /// Create a new TOA reader.
     pub fn new(inner: R, validate_rs: bool) -> Self {
         Self {
@@ -182,7 +182,7 @@ impl<R: OptimizedReader> TOAStreamingReader<R> {
     }
 }
 
-impl<R: OptimizedReader> Read for TOAStreamingReader<R> {
+impl<R: Read> Read for TOAStreamingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -247,16 +247,10 @@ impl<R: OptimizedReader> Read for TOAStreamingReader<R> {
 #[cfg(feature = "std")]
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Cursor, Write},
-        ops::Deref,
-    };
+    use std::io::{Cursor, Write};
 
     use super::*;
-    use crate::{
-        lzma::optimized_reader::{IoReader, SliceReader},
-        writer::{TOAOptions, TOAStreamingWriter},
-    };
+    use crate::writer::{TOAOptions, TOAStreamingWriter};
 
     #[test]
     fn test_round_trip_empty() {
@@ -266,8 +260,7 @@ mod tests {
         let writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
         writer.finish().unwrap();
 
-        let slice_reader = SliceReader::new(compressed.deref());
-        let mut reader = TOAStreamingReader::new(slice_reader, true);
+        let mut reader = TOAStreamingReader::new(compressed.as_slice(), true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 
@@ -284,8 +277,7 @@ mod tests {
         writer.write_all(original_data).unwrap();
         writer.finish().unwrap();
 
-        let io_reader = IoReader::new(compressed.deref());
-        let mut reader = TOAStreamingReader::new(io_reader, true);
+        let mut reader = TOAStreamingReader::new(compressed.as_slice(), true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 
@@ -309,8 +301,7 @@ mod tests {
         writer.write_all(&original_data).unwrap();
         writer.finish().unwrap();
 
-        let slice_reader = SliceReader::new(compressed.deref());
-        let mut reader = TOAStreamingReader::new(slice_reader, true);
+        let mut reader = TOAStreamingReader::new(compressed.as_slice(), true);
         let mut decompressed = Vec::new();
         reader.read_to_end(&mut decompressed).unwrap();
 

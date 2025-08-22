@@ -5,25 +5,25 @@ pub use streaming_reader::TOAStreamingReader;
 
 use crate::{
     ErrorCorrection, Prefilter, Read, Result,
-    lzma::{filter::bcj::BCJReader, lzma_reader::LZMAReader, optimized_reader::OptimizedReader},
+    lzma::{LZMA2sReader, filter::bcj::BCJReader},
     reader::ecc_reader::ECCReader,
 };
 
 /// All possible reader combinations.
 #[allow(clippy::large_enum_variant)]
 enum Reader<R> {
-    Lzma(LZMAReader<ECCReader<R>>),
-    BcjX86(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjArm(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjArmThumb(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjArm64(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjSparc(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjPowerPc(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjIa64(BCJReader<LZMAReader<ECCReader<R>>>),
-    BcjRiscV(BCJReader<LZMAReader<ECCReader<R>>>),
+    Lzma(LZMA2sReader<ECCReader<R>>),
+    BcjX86(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjArm(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjArmThumb(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjArm64(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjSparc(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjPowerPc(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjIa64(BCJReader<LZMA2sReader<ECCReader<R>>>),
+    BcjRiscV(BCJReader<LZMA2sReader<ECCReader<R>>>),
 }
 
-impl<R: OptimizedReader> Read for Reader<R> {
+impl<R: Read> Read for Reader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self {
             Reader::Lzma(reader) => reader.read(buf),
@@ -39,7 +39,7 @@ impl<R: OptimizedReader> Read for Reader<R> {
     }
 }
 
-impl<R: OptimizedReader> Reader<R> {
+impl<R: Read> Reader<R> {
     /// Create a new reader chain based on the header configuration.
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -54,15 +54,13 @@ impl<R: OptimizedReader> Reader<R> {
     ) -> Result<Self> {
         let ecc_reader = ECCReader::new(reader, error_correction, validate_rs);
 
-        let lzma_reader = LZMAReader::new(
+        let lzma_reader = LZMA2sReader::new(
             ecc_reader,
-            u64::MAX,
-            lc as u32,
-            lp as u32,
-            pb as u32,
+            u32::from(lc),
+            u32::from(lp),
+            u32::from(pb),
             dict_size,
-            None,
-        )?;
+        );
 
         #[rustfmt::skip]
         let chain = match prefilter {

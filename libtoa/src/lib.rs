@@ -47,7 +47,6 @@ pub(crate) use std::io::Write;
 
 pub use cv_stack::CVStack;
 pub use header::{TOABlockHeader, TOAHeader};
-pub use lzma::optimized_reader;
 pub use metadata::TOAMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;
@@ -159,12 +158,6 @@ impl TryFrom<u8> for Prefilter {
             _ => Err(()),
         }
     }
-}
-
-#[cfg(feature = "std")]
-#[inline(always)]
-fn error_eof() -> Error {
-    Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF")
 }
 
 #[cfg(feature = "std")]

@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use crate::error_other;
+use crate::{Read, error_other};
 
 #[derive(Default)]
 pub(crate) struct LZDecoder {
@@ -128,6 +128,21 @@ impl LZDecoder {
     pub(crate) fn repeat_pending(&mut self) -> crate::Result<()> {
         if self.pending_len > 0 {
             self.repeat(self.pending_dist, self.pending_len)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn copy_uncompressed<R: Read>(
+        &mut self,
+        mut in_data: R,
+        len: usize,
+    ) -> crate::Result<()> {
+        let copy_size = (self.buf_size - self.pos).min(len);
+        let buf = &mut self.buf[self.pos..(self.pos + copy_size)];
+        in_data.read_exact(buf)?;
+        self.pos += copy_size;
+        if self.full < self.pos {
+            self.full = self.pos;
         }
         Ok(())
     }

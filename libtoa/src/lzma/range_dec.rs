@@ -1,41 +1,48 @@
-use super::{
-    BIT_MODEL_TOTAL_BITS, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS,
-    optimized_reader::OptimizedReader,
-};
-use crate::error_invalid_input;
+use super::{BIT_MODEL_TOTAL_BITS, ByteReader, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS};
+use crate::{Read, error_invalid_input};
 
-pub(crate) struct RangeDecoder<R> {
-    inner: R,
+pub(crate) struct RangeDecoder {
+    inner: RangeDecoderBuffer,
     range: u32,
     code: u32,
 }
 
-impl<R> RangeDecoder<R> {
-    pub(crate) fn into_inner(self) -> R {
-        self.inner
-    }
-}
-
-impl<R: OptimizedReader> RangeDecoder<R> {
-    pub(crate) fn new_stream(mut inner: R) -> crate::Result<Self> {
-        let b = inner.try_read_u8()?;
-        if b != 0x00 {
-            return Err(error_invalid_input("range decoder first byte is not zero"));
+impl RangeDecoder {
+    pub(crate) fn new_buffer(size: usize) -> Self {
+        Self {
+            inner: RangeDecoderBuffer::new(size - 5),
+            code: 0,
+            range: 0,
         }
-        let code = inner.try_read_u32_be()?;
-        Ok(Self {
-            inner,
-            code,
-            range: 0xFFFFFFFFu32,
-        })
-    }
-
-    pub(crate) fn is_stream_finished(&self) -> bool {
-        self.code == 0
     }
 }
 
-impl<R: OptimizedReader> RangeDecoder<R> {
+struct RangeDecoderBuffer {
+    buf: Vec<u8>,
+    pos: usize,
+}
+
+impl RangeDecoderBuffer {
+    fn new(len: usize) -> Self {
+        Self {
+            buf: vec![0; len],
+            pos: len,
+        }
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        // Out of bound reads return an 1, which is fine, since the
+        // LZMA reader will then throw a "dist overflow" error.
+        // Not returning an error results in code that can be better
+        // optimized in the hot path and overall 10% better decoding
+        // performance.
+        let byte = *self.buf.get(self.pos).unwrap_or(&1);
+        self.pos += 1;
+        byte
+    }
+}
+
+impl RangeDecoder {
     #[inline(always)]
     pub(crate) fn normalize(&mut self) {
         if self.range < 0x0100_0000 {
@@ -111,14 +118,14 @@ impl<R: OptimizedReader> RangeDecoder<R> {
     pub(crate) fn decode_direct_bits(&mut self, count: u32) -> i32 {
         #[cfg(all(feature = "optimization", target_arch = "aarch64"))]
         {
-            if self.inner.is_buffer() && count > 0 {
+            if count > 0 {
                 return self.decode_direct_bits_aarch64(count);
             }
         }
 
         #[cfg(all(feature = "optimization", target_arch = "x86_64"))]
         {
-            if self.inner.is_buffer() && count > 0 {
+            if count > 0 {
                 return self.decode_direct_bits_x86_64(count);
             }
         }
@@ -163,9 +170,9 @@ impl<R: OptimizedReader> RangeDecoder<R> {
         // violate.
         unsafe {
             let mut result: i32 = 0;
-            let mut pos = self.inner.pos();
+            let mut pos = self.inner.pos;
 
-            let buf = self.inner.buf();
+            let buf = self.inner.buf.as_slice();
             let buf_ptr = buf.as_ptr();
             let limit = buf.len() - 1;
 
@@ -232,7 +239,7 @@ impl<R: OptimizedReader> RangeDecoder<R> {
 
             // We clamp to the size of the buffer because `pos == buf.len()` signals
             // that there is nothing more to read.
-            self.inner.set_pos(pos.min(buf.len()));
+            self.inner.pos = pos.min(buf.len());
 
             result
         }
@@ -318,5 +325,29 @@ impl<R: OptimizedReader> RangeDecoder<R> {
 
             result
         }
+    }
+
+    pub(crate) fn prepare<R: Read>(&mut self, mut reader: R, len: usize) -> crate::Result<()> {
+        if len < 5 {
+            return Err(error_invalid_input("buffer len must >= 5"));
+        }
+
+        let b = reader.read_u8()?;
+        if b != 0x00 {
+            return Err(error_invalid_input("first byte is 0"));
+        }
+        self.code = reader.read_u32()?;
+
+        self.range = 0xFFFFFFFFu32;
+        let len = len - 5;
+        let pos = self.inner.buf.len() - len;
+        let end = pos + len;
+        self.inner.pos = pos;
+        reader.read_exact(&mut self.inner.buf[pos..end])
+    }
+
+    #[inline]
+    pub(crate) fn is_finished(&self) -> bool {
+        self.inner.pos == self.inner.buf.len() && self.code == 0
     }
 }

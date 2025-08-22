@@ -3,7 +3,7 @@ use alloc::{vec, vec::Vec};
 use super::{
     ALIGN_BITS, DIST_MODEL_END, DIST_MODEL_START, LOW_SYMBOLS, LZMACoder, LengthCoder,
     LiteralCoder, LiteralSubCoder, MATCH_LEN_MIN, MID_SYMBOLS, coder_get_dict_size, lz::LZDecoder,
-    optimized_reader::OptimizedReader, range_dec::RangeDecoder,
+    range_dec::RangeDecoder,
 };
 
 pub(crate) struct LZMADecoder {
@@ -35,14 +35,17 @@ impl LZMADecoder {
         }
     }
 
-    pub(crate) fn end_marker_detected(&self) -> bool {
-        self.coder.reps[0] == -1
+    pub(crate) fn reset(&mut self) {
+        self.coder.reset();
+        self.literal_decoder.reset();
+        self.match_len_decoder.reset();
+        self.rep_len_decoder.reset();
     }
 
-    pub(crate) fn decode<R: OptimizedReader>(
+    pub(crate) fn decode(
         &mut self,
         lz: &mut LZDecoder,
-        rc: &mut RangeDecoder<R>,
+        rc: &mut RangeDecoder,
     ) -> crate::Result<()> {
         lz.repeat_pending()?;
         while lz.has_space() {
@@ -66,11 +69,7 @@ impl LZMADecoder {
         Ok(())
     }
 
-    fn decode_match<R: OptimizedReader>(
-        &mut self,
-        pos_state: u32,
-        rc: &mut RangeDecoder<R>,
-    ) -> u32 {
+    fn decode_match(&mut self, pos_state: u32, rc: &mut RangeDecoder) -> u32 {
         self.coder.state.update_match();
         self.coder.reps[3] = self.coder.reps[2];
         self.coder.reps[2] = self.coder.reps[1];
@@ -100,11 +99,7 @@ impl LZMADecoder {
         len as _
     }
 
-    fn decode_rep_match<R: OptimizedReader>(
-        &mut self,
-        pos_state: u32,
-        rc: &mut RangeDecoder<R>,
-    ) -> u32 {
+    fn decode_rep_match(&mut self, pos_state: u32, rc: &mut RangeDecoder) -> u32 {
         let index = self.coder.state.get() as usize;
         if rc.decode_bit(&mut self.coder.is_rep0[index]) == 0 {
             let index: usize = self.coder.state.get() as usize;
@@ -157,11 +152,11 @@ impl LiteralDecoder {
         }
     }
 
-    fn decode<R: OptimizedReader>(
+    fn decode(
         &mut self,
         coder: &mut LZMACoder,
         lz: &mut LZDecoder,
-        rc: &mut RangeDecoder<R>,
+        rc: &mut RangeDecoder,
     ) -> crate::Result<()> {
         let i = self
             .coder
@@ -183,11 +178,11 @@ impl LiteralSubDecoder {
         }
     }
 
-    pub(crate) fn decode<R: OptimizedReader>(
+    pub(crate) fn decode(
         &mut self,
         coder: &mut LZMACoder,
         lz: &mut LZDecoder,
-        rc: &mut RangeDecoder<R>,
+        rc: &mut RangeDecoder,
     ) -> crate::Result<()> {
         let mut symbol: u32 = 1;
         let liter = coder.state.is_literal();
@@ -225,7 +220,7 @@ impl LiteralSubDecoder {
 }
 
 impl LengthCoder {
-    fn decode<R: OptimizedReader>(&mut self, pos_state: usize, rc: &mut RangeDecoder<R>) -> i32 {
+    fn decode(&mut self, pos_state: usize, rc: &mut RangeDecoder) -> i32 {
         if rc.decode_bit(&mut self.choice[0]) == 0 {
             return rc
                 .decode_bit_tree(&mut self.low[pos_state])

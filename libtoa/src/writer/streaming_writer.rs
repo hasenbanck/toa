@@ -7,7 +7,7 @@ use crate::{
     cv_stack::CVStack,
     error_invalid_data,
     header::{TOABlockHeader, TOAHeader},
-    lzma::{LZMAOptions, LZMAWriter, filter::bcj::BCJWriter},
+    lzma::{LZMA2sWriter, LZMAOptions, filter::bcj::BCJWriter},
     trailer::TOAFileTrailer,
     writer::ecc_writer::ECCWriter,
 };
@@ -15,15 +15,15 @@ use crate::{
 /// All possible writer combination.
 #[allow(clippy::large_enum_variant)]
 enum Writer {
-    Lzma(LZMAWriter<ECCWriter<Vec<u8>>>),
-    BcjX86(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjArm(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjArmThumb(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjArm64(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjSparc(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjPowerPc(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjIa64(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
-    BcjRiscV(BCJWriter<LZMAWriter<ECCWriter<Vec<u8>>>>),
+    Lzma(LZMA2sWriter<ECCWriter<Vec<u8>>>),
+    BcjX86(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjArm(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjArmThumb(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjArm64(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjSparc(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjPowerPc(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjIa64(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
+    BcjRiscV(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
 }
 
 impl Write for Writer {
@@ -58,11 +58,12 @@ impl Write for Writer {
 
 impl Writer {
     /// Create a new writer chain based on the options.
-    fn new(options: &TOAOptions, buffer: Vec<u8>) -> Result<Self> {
+    fn new(options: &TOAOptions, block_size: u64, buffer: Vec<u8>) -> Self {
         let ecc_writer = ECCWriter::new(buffer, options.error_correction);
 
-        let lzma_writer = LZMAWriter::new_no_header(
+        let lzma_writer = LZMA2sWriter::new(
             ecc_writer,
+            block_size,
             &LZMAOptions {
                 dict_size: options.dict_size(),
                 lc: u32::from(options.lc),
@@ -72,10 +73,8 @@ impl Writer {
                 nice_len: u32::from(options.nice_len),
                 mf: options.mf,
                 depth_limit: i32::from(options.depth_limit),
-                preset_dict: None,
             },
-            true,
-        )?;
+        );
 
         #[rustfmt::skip]
         let chain = match options.prefilter {
@@ -90,7 +89,7 @@ impl Writer {
             Prefilter::BcjRiscV => Writer::BcjRiscV(BCJWriter::new_riscv(lzma_writer, 0)),
         };
 
-        Ok(chain)
+        chain
     }
 
     /// Finish the writer chain and extract the compressed data.
@@ -123,11 +122,14 @@ pub struct TOAStreamingWriter<W> {
     cv_stack: CVStack,
     uncompressed_size: u64,
     compressed_size: u64,
+    block_size: u64,
 }
 
 impl<W: Write> TOAStreamingWriter<W> {
     /// Create a new TOA writer with the given options.
     pub fn new(inner: W, options: TOAOptions) -> Self {
+        let block_size = options.block_size().unwrap_or(u64::MAX / 2);
+
         Self {
             inner,
             writer: None,
@@ -138,6 +140,7 @@ impl<W: Write> TOAStreamingWriter<W> {
             cv_stack: CVStack::new(),
             uncompressed_size: 0,
             compressed_size: 0,
+            block_size,
         }
     }
 
@@ -153,15 +156,13 @@ impl<W: Write> TOAStreamingWriter<W> {
         Ok(())
     }
 
-    fn start_new_block(&mut self, buffer: Vec<u8>) -> Result<()> {
-        let writer = Writer::new(&self.options, buffer)?;
+    fn start_new_block(&mut self, buffer: Vec<u8>) {
+        let writer = Writer::new(&self.options, self.block_size, buffer);
         self.writer = Some(writer);
 
         let mut hasher = blake3::Hasher::new();
         hasher.set_input_offset(self.uncompressed_size);
         self.current_block_hasher = hasher;
-
-        Ok(())
     }
 
     fn finish_current_block(
@@ -252,7 +253,7 @@ impl<W: Write> Write for TOAStreamingWriter<W> {
         }
 
         if self.writer.is_none() {
-            self.start_new_block(Vec::new())?;
+            self.start_new_block(Vec::new());
         }
 
         let mut total_written = 0;
@@ -260,23 +261,18 @@ impl<W: Write> Write for TOAStreamingWriter<W> {
 
         while !remaining.is_empty() {
             // Check if we need to start a new block based on uncompressed size limits.
-            let block_limit = if let Some(block_size) = self.options.block_size() {
-                block_size
-            } else {
-                u64::MAX
-            };
-
-            if self.current_block_uncompressed_size >= block_limit {
+            if self.current_block_uncompressed_size >= self.block_size {
                 // Current block is full, finish it and start a new one.
                 if let Some(writer) = self.writer.take() {
                     // Full blocks are never partial (they're exactly block_size).
                     let buffer = self.finish_current_block(writer, false, false)?;
-                    self.start_new_block(buffer)?;
+                    self.start_new_block(buffer);
                 }
             }
 
-            let space_left_in_block =
-                block_limit.saturating_sub(self.current_block_uncompressed_size);
+            let space_left_in_block = self
+                .block_size
+                .saturating_sub(self.current_block_uncompressed_size);
             let write_size = remaining.len().min(space_left_in_block as usize);
 
             let bytes_written = self
@@ -405,18 +401,18 @@ mod tests {
     // Specification: Appendix A.1 Minimal File
     #[test]
     fn test_toa_writer_zero_byte() {
-        let expected_compressed: [u8; 171] = hex!(
+        let expected_compressed: [u8; 165] = hex!(
             "fedcba980100011f5d1e884b0ed50069
              d44c9ae6faa030510e67da670b3259a2
-             400000000000000b2d3adedff11b61f1
+             40000000000000052d3adedff11b61f1
              4c886e35afa036736dcd87a74d27b5c1
-             510225d0f592e21320fe0ef111f7500f
-             a4207a02281c71866fb1ec323892b227
-             000041fef7ffffe00080008000000000
-             0000012d3adedff11b61f14c886e35af
-             a036736dcd87a74d27b5c1510225d0f5
-             92e2137e40e16f84c3e6a17e3c65da1f
-             2c61ddd66d5f4a662c32b9"
+             510225d0f592e21319fd6b0ccec085a0
+             1fe8fcbdaeca06f1572e90fee6bee37e
+             200000000080000000000000012d3ade
+             dff11b61f14c886e35afa036736dcd87
+             a74d27b5c1510225d0f592e2137e40e1
+             6f84c3e6a17e3c65da1f2c61ddd66d5f
+             4a662c32b9"
         );
         let expected_header_rs_parity: [u8; 22] =
             hex!("884b0ed50069d44c9ae6faa030510e67da670b3259a2");
@@ -441,7 +437,7 @@ mod tests {
         writer.write_all(&[0x00]).unwrap();
         let _ = writer.finish().unwrap();
 
-        assert_eq!(buffer.len(), 171, "Total file size should be 171 bytes");
+        assert_eq!(buffer.len(), 165, "Total file size should be 165 bytes");
 
         let (header, rest) = buffer.split_at(32);
         let (header, header_parity) = header.split_at(10);
@@ -485,17 +481,11 @@ mod tests {
 
         let physical_size = physical_size_with_flags & !(3u64 << 62); // Clear both flags
 
-        assert_eq!(physical_size, 11, "Physical size should be 11");
+        assert_eq!(physical_size, 5, "Physical size should be 5");
 
-        let (block_data, trailer) = after_block_header.split_at(11);
+        let (block_data, trailer) = after_block_header.split_at(5);
 
-        assert_eq!(
-            block_data,
-            &[
-                0x00, 0x00, 0x41, 0xFE, 0xF7, 0xFF, 0xFF, 0xE0, 0x00, 0x80, 0x00
-            ],
-            "LZMA payload"
-        );
+        assert_eq!(block_data, &[0x20, 0x00, 0x00, 0x00, 0x00], "LZMA payload");
 
         assert_eq!(trailer.len(), 64, "Trailer should be exactly 64 bytes");
 

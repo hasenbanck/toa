@@ -38,10 +38,6 @@ impl<W: Write> RangeEncoder<W> {
         e
     }
 
-    pub(crate) fn into_inner(self) -> W {
-        self.inner
-    }
-
     pub(crate) fn reset(&mut self) {
         self.low = 0;
         self.range = 0xFFFFFFFFu32;
@@ -206,5 +202,66 @@ impl RangeEncoder<()> {
     #[inline]
     pub(crate) fn get_direct_bits_price(count: u32) -> u32 {
         count << BIT_PRICE_SHIFT_BITS
+    }
+}
+
+impl RangeEncoder<RangeEncoderBuffer> {
+    pub(crate) fn write_to<W: Write>(&self, out: &mut W) -> crate::Result<()> {
+        self.inner.write_to(out)
+    }
+
+    pub(crate) fn finish_buffer(&mut self) -> crate::Result<Option<usize>> {
+        self.finish()?;
+        Ok(Some(self.inner.pos))
+    }
+
+    pub(crate) fn new_buffer(buf_size: usize) -> Self {
+        Self::new(RangeEncoderBuffer::new(buf_size))
+    }
+
+    pub(crate) fn reset_buffer(&mut self) {
+        self.reset();
+        self.inner.pos = 0;
+    }
+
+    #[inline]
+    pub(crate) fn get_pending_size(&self) -> u32 {
+        self.inner.pos as u32 + self.cache_size + 5 - 1
+    }
+}
+
+pub(crate) struct RangeEncoderBuffer {
+    buf: Vec<u8>,
+    pos: usize,
+}
+
+impl RangeEncoderBuffer {
+    pub(crate) fn new(size: usize) -> Self {
+        Self {
+            buf: vec![0; size],
+            pos: 0,
+        }
+    }
+
+    pub(crate) fn write_to<W: Write>(&self, out: &mut W) -> crate::Result<()> {
+        out.write_all(&self.buf[..self.pos])
+    }
+}
+
+impl Write for RangeEncoderBuffer {
+    fn write(&mut self, buf: &[u8]) -> crate::Result<usize> {
+        let size = buf.len().min(self.buf.len() - self.pos);
+
+        if size == 0 {
+            return Ok(0);
+        }
+
+        self.buf[self.pos..(self.pos + size)].copy_from_slice(&buf[..size]);
+        self.pos += size;
+        Ok(size)
+    }
+
+    fn flush(&mut self) -> crate::Result<()> {
+        Ok(())
     }
 }
