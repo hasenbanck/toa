@@ -37,6 +37,10 @@ mod metadata;
 #[cfg(not(feature = "std"))]
 mod no_std;
 mod trailer;
+#[cfg(feature = "std")]
+mod work_pool;
+#[cfg(feature = "std")]
+mod work_queue;
 
 #[cfg(feature = "std")]
 pub(crate) use std::io::Error;
