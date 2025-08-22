@@ -38,8 +38,6 @@ mod metadata;
 mod no_std;
 mod trailer;
 #[cfg(feature = "std")]
-mod work_pool;
-#[cfg(feature = "std")]
 mod work_queue;
 
 #[cfg(feature = "std")]
@@ -60,7 +58,7 @@ pub use no_std::Read;
 pub use no_std::Write;
 pub use reader::TOAStreamingReader;
 pub use trailer::TOAFileTrailer;
-pub use writer::{TOAOptions, TOAStreamingWriter};
+pub use writer::{TOABlockWriter, TOAOptions, TOAStreamingWriter};
 
 /// Result type of the crate.
 #[cfg(feature = "std")]

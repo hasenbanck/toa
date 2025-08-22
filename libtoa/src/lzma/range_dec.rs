@@ -253,9 +253,9 @@ impl RangeDecoder {
         // violate.
         unsafe {
             let mut result: i32 = 0;
-            let mut pos = self.inner.pos();
+            let mut pos = self.inner.pos;
 
-            let buf = self.inner.buf();
+            let buf = &self.inner.buf;
             let buf_ptr = buf.as_ptr();
             let limit = buf.len() - 1;
 
@@ -321,7 +321,7 @@ impl RangeDecoder {
 
             // We clamp to the size of the buffer because `pos == buf.len()` signals
             // that there is nothing more to read.
-            self.inner.set_pos(pos.min(buf.len()));
+            self.inner.pos = pos.min(buf.len());
 
             result
         }

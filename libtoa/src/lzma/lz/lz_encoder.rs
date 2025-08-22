@@ -475,21 +475,21 @@ unsafe fn normalize_avx2(positions: &mut [i32], norm_offset: i32) {
     let norm_v = _mm256_set1_epi32(norm_offset);
 
     // Split the slice into a 32-byte aligned middle part and unaligned ends.
-    let (prefix, chunks, suffix) = positions.align_to_mut::<__m256i>();
+    let (prefix, chunks, suffix) = unsafe { positions.align_to_mut::<__m256i>() };
 
     normalize_scalar(prefix, norm_offset);
 
     for chunk in chunks {
         // Use ALIGNED load. This is safe because `align_to_mut`
         // guarantees that `chunk` is aligned to 32 bytes.
-        let data = _mm256_load_si256(chunk as *mut _);
+        let data = unsafe { _mm256_load_si256(chunk as *mut _) };
 
         // Perform saturated subtraction on 8 integers simultaneously.
         let max_val = _mm256_max_epi32(data, norm_v);
         let result = _mm256_sub_epi32(max_val, norm_v);
 
         // Use ALIGNED store to write the results back.
-        _mm256_store_si256(chunk as *mut _, result);
+        unsafe { _mm256_store_si256(chunk as *mut _, result) };
     }
 
     normalize_scalar(suffix, norm_offset);
@@ -505,20 +505,20 @@ unsafe fn normalize_sse41(positions: &mut [i32], norm_offset: i32) {
     let norm_v = _mm_set1_epi32(norm_offset);
 
     // Split the slice into a 16-byte aligned middle part and unaligned ends.
-    let (prefix, chunks, suffix) = positions.align_to_mut::<__m128i>();
+    let (prefix, chunks, suffix) = unsafe { positions.align_to_mut::<__m128i>() };
 
     normalize_scalar(prefix, norm_offset);
 
     // Process the aligned middle part in 128-bit (4 x i32) chunks.
     for chunk in chunks {
         // Use ALIGNED 128-bit load.
-        let data = _mm_load_si128(chunk as *mut _);
+        let data = unsafe { _mm_load_si128(chunk as *mut _) };
 
         let max_val = _mm_max_epi32(data, norm_v);
         let result = _mm_sub_epi32(max_val, norm_v);
 
         // Use ALIGNED 128-bit store.
-        _mm_store_si128(chunk as *mut _, result);
+        unsafe { _mm_store_si128(chunk as *mut _, result) };
     }
 
     normalize_scalar(suffix, norm_offset);

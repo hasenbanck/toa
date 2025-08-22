@@ -1,127 +1,17 @@
-use alloc::vec::Vec;
-
-use blake3::hazmat::HasherExt;
-
+use super::TOABlockWriter;
 use crate::{
-    Prefilter, Result, TOAOptions, Write,
-    cv_stack::CVStack,
-    error_invalid_data,
-    header::{TOABlockHeader, TOAHeader},
-    lzma::{LZMA2sWriter, LZMAOptions, filter::bcj::BCJWriter},
-    trailer::TOAFileTrailer,
-    writer::ecc_writer::ECCWriter,
+    Result, TOAOptions, Write, cv_stack::CVStack, header::TOAHeader, trailer::TOAFileTrailer,
 };
-
-/// All possible writer combination.
-#[allow(clippy::large_enum_variant)]
-enum Writer {
-    Lzma(LZMA2sWriter<ECCWriter<Vec<u8>>>),
-    BcjX86(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjArm(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjArmThumb(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjArm64(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjSparc(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjPowerPc(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjIa64(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-    BcjRiscV(BCJWriter<LZMA2sWriter<ECCWriter<Vec<u8>>>>),
-}
-
-impl Write for Writer {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        match self {
-            Writer::Lzma(writer) => writer.write(buf),
-            Writer::BcjX86(writer) => writer.write(buf),
-            Writer::BcjArm(writer) => writer.write(buf),
-            Writer::BcjArmThumb(writer) => writer.write(buf),
-            Writer::BcjArm64(writer) => writer.write(buf),
-            Writer::BcjSparc(writer) => writer.write(buf),
-            Writer::BcjPowerPc(writer) => writer.write(buf),
-            Writer::BcjIa64(writer) => writer.write(buf),
-            Writer::BcjRiscV(writer) => writer.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        match self {
-            Writer::Lzma(writer) => writer.flush(),
-            Writer::BcjX86(writer) => writer.flush(),
-            Writer::BcjArm(writer) => writer.flush(),
-            Writer::BcjArmThumb(writer) => writer.flush(),
-            Writer::BcjArm64(writer) => writer.flush(),
-            Writer::BcjSparc(writer) => writer.flush(),
-            Writer::BcjPowerPc(writer) => writer.flush(),
-            Writer::BcjIa64(writer) => writer.flush(),
-            Writer::BcjRiscV(writer) => writer.flush(),
-        }
-    }
-}
-
-impl Writer {
-    /// Create a new writer chain based on the options.
-    fn new(options: &TOAOptions, block_size: u64, buffer: Vec<u8>) -> Self {
-        let ecc_writer = ECCWriter::new(buffer, options.error_correction);
-
-        let lzma_writer = LZMA2sWriter::new(
-            ecc_writer,
-            block_size,
-            &LZMAOptions {
-                dict_size: options.dict_size(),
-                lc: u32::from(options.lc),
-                lp: u32::from(options.lp),
-                pb: u32::from(options.pb),
-                mode: options.mode,
-                nice_len: u32::from(options.nice_len),
-                mf: options.mf,
-                depth_limit: i32::from(options.depth_limit),
-            },
-        );
-
-        #[rustfmt::skip]
-        let chain = match options.prefilter {
-            Prefilter::None => Writer::Lzma(lzma_writer),
-            Prefilter::BcjX86 => Writer::BcjX86(BCJWriter::new_x86(lzma_writer, 0)),
-            Prefilter::BcjArm => Writer::BcjArm(BCJWriter::new_arm(lzma_writer, 0)),
-            Prefilter::BcjArmThumb => Writer::BcjArmThumb(BCJWriter::new_arm_thumb(lzma_writer, 0)),
-            Prefilter::BcjArm64 => Writer::BcjArm64(BCJWriter::new_arm64(lzma_writer, 0)),
-            Prefilter::BcjSparc => Writer::BcjSparc(BCJWriter::new_sparc(lzma_writer, 0)),
-            Prefilter::BcjPowerPc => Writer::BcjPowerPc(BCJWriter::new_ppc(lzma_writer, 0)),
-            Prefilter::BcjIa64 => Writer::BcjIa64(BCJWriter::new_ia64(lzma_writer, 0)),
-            Prefilter::BcjRiscV => Writer::BcjRiscV(BCJWriter::new_riscv(lzma_writer, 0)),
-        };
-
-        chain
-    }
-
-    /// Finish the writer chain and extract the compressed data.
-    fn finish(self) -> Result<Vec<u8>> {
-        let ecc_writer = match self {
-            Writer::Lzma(writer) => writer.finish()?,
-            Writer::BcjX86(writer) => writer.into_inner().finish()?,
-            Writer::BcjArm(writer) => writer.into_inner().finish()?,
-            Writer::BcjArmThumb(writer) => writer.into_inner().finish()?,
-            Writer::BcjArm64(writer) => writer.into_inner().finish()?,
-            Writer::BcjSparc(writer) => writer.into_inner().finish()?,
-            Writer::BcjPowerPc(writer) => writer.into_inner().finish()?,
-            Writer::BcjIa64(writer) => writer.into_inner().finish()?,
-            Writer::BcjRiscV(writer) => writer.into_inner().finish()?,
-        };
-
-        // Finish the ECCWriter to get the final data.
-        ecc_writer.finish()
-    }
-}
 
 /// A single-threaded streaming TOA compressor.
 pub struct TOAStreamingWriter<W> {
     inner: W,
-    writer: Option<Writer>,
+    block_writer: Option<TOABlockWriter>,
     options: TOAOptions,
     header_written: bool,
-    current_block_uncompressed_size: u64,
-    current_block_hasher: blake3::Hasher,
     cv_stack: CVStack,
     uncompressed_size: u64,
-    compressed_size: u64,
+
     block_size: u64,
 }
 
@@ -132,14 +22,11 @@ impl<W: Write> TOAStreamingWriter<W> {
 
         Self {
             inner,
-            writer: None,
+            block_writer: None,
             options,
             header_written: false,
-            current_block_uncompressed_size: 0,
-            current_block_hasher: blake3::Hasher::new(),
             cv_stack: CVStack::new(),
             uncompressed_size: 0,
-            compressed_size: 0,
             block_size,
         }
     }
@@ -156,58 +43,32 @@ impl<W: Write> TOAStreamingWriter<W> {
         Ok(())
     }
 
-    fn start_new_block(&mut self, buffer: Vec<u8>) {
-        let writer = Writer::new(&self.options, self.block_size, buffer);
-        self.writer = Some(writer);
-
-        let mut hasher = blake3::Hasher::new();
-        hasher.set_input_offset(self.uncompressed_size);
-        self.current_block_hasher = hasher;
+    fn ensure_block_writer_exists(&mut self) {
+        if self.block_writer.is_none() {
+            let block_writer =
+                TOABlockWriter::new(self.options, self.block_size, self.uncompressed_size);
+            self.block_writer = Some(block_writer);
+        }
     }
 
-    fn finish_current_block(
-        &mut self,
-        writer: Writer,
-        is_final_block: bool,
-        is_partial_block: bool,
-    ) -> Result<Vec<u8>> {
-        let mut compressed_data = writer.finish()?;
-
-        if !compressed_data.is_empty() {
-            let compressed_size = compressed_data.len();
-
-            if compressed_size > (i64::MAX as usize) {
-                return Err(error_invalid_data("compressed block too large"));
-            }
-
-            if is_partial_block && !is_final_block {
-                return Err(error_invalid_data(
-                    "partial blocks only allowed as final block",
-                ));
-            }
-
-            // For single-block files, we finalize as root. For multi-block files, as chaining value.
-            let hash_value = if is_final_block && self.cv_stack.is_empty() {
-                *self.current_block_hasher.finalize().as_bytes()
-            } else {
-                self.current_block_hasher.finalize_non_root()
+    fn finish_current_block(&mut self, is_final_block: bool) -> Result<()> {
+        if let Some(ref mut block_writer) = self.block_writer {
+            let next_block_offset = match is_final_block {
+                true => 0,
+                false => self.uncompressed_size,
             };
 
+            let chaining_value = block_writer.finish_and_reset(
+                &mut self.inner,
+                is_final_block,
+                next_block_offset,
+            )?;
+
             self.cv_stack
-                .add_chunk_chaining_value(hash_value, is_final_block);
-
-            let header = TOABlockHeader::new(compressed_size as u64, is_partial_block, hash_value);
-            header.write(&mut self.inner)?;
-
-            self.inner.write_all(&compressed_data)?;
-            self.compressed_size += compressed_size as u64;
-
-            // Reset for next block.
-            self.current_block_uncompressed_size = 0;
-            compressed_data.clear();
+                .add_chunk_chaining_value(chaining_value, is_final_block);
         }
 
-        Ok(compressed_data)
+        Ok(())
     }
 
     fn write_file_trailer(&mut self) -> Result<()> {
@@ -229,11 +90,8 @@ impl<W: Write> TOAStreamingWriter<W> {
             self.write_header()?;
         }
 
-        if let Some(counting_writer) = self.writer.take() {
-            // Determine if this is a partial block based on the block size.
-            let header = TOAHeader::from_options(&self.options);
-            let is_partial_block = self.current_block_uncompressed_size < header.block_size();
-            self.finish_current_block(counting_writer, true, is_partial_block)?;
+        if self.block_writer.is_some() {
+            self.finish_current_block(true)?;
         }
 
         self.write_file_trailer()?;
@@ -252,41 +110,24 @@ impl<W: Write> Write for TOAStreamingWriter<W> {
             self.write_header()?;
         }
 
-        if self.writer.is_none() {
-            self.start_new_block(Vec::new());
-        }
+        self.ensure_block_writer_exists();
 
         let mut total_written = 0;
         let mut remaining = buf;
 
         while !remaining.is_empty() {
-            // Check if we need to start a new block based on uncompressed size limits.
-            if self.current_block_uncompressed_size >= self.block_size {
-                // Current block is full, finish it and start a new one.
-                if let Some(writer) = self.writer.take() {
-                    // Full blocks are never partial (they're exactly block_size).
-                    let buffer = self.finish_current_block(writer, false, false)?;
-                    self.start_new_block(buffer);
-                }
+            // Check if we need to finish the current block based on uncompressed size limits.
+            if let Some(ref block_writer) = self.block_writer
+                && block_writer.is_full()
+            {
+                self.finish_current_block(false)?;
+                // Block writer is automatically reset by finish_and_reset
             }
 
-            let space_left_in_block = self
-                .block_size
-                .saturating_sub(self.current_block_uncompressed_size);
-            let write_size = remaining.len().min(space_left_in_block as usize);
+            let block_writer = self.block_writer.as_mut().expect("block writer not set");
+            let bytes_written = block_writer.write(remaining)?;
 
-            let bytes_written = self
-                .writer
-                .as_mut()
-                .expect("writer not set")
-                .write(&remaining[..write_size])?;
-
-            self.current_block_uncompressed_size += bytes_written as u64;
             self.uncompressed_size += bytes_written as u64;
-
-            self.current_block_hasher
-                .update(&remaining[..bytes_written]);
-
             total_written += bytes_written;
             remaining = &remaining[bytes_written..];
         }
@@ -295,8 +136,8 @@ impl<W: Write> Write for TOAStreamingWriter<W> {
     }
 
     fn flush(&mut self) -> Result<()> {
-        if let Some(ref mut counting_writer) = self.writer {
-            counting_writer.flush()?;
+        if let Some(ref mut block_writer) = self.block_writer {
+            block_writer.flush()?;
         }
 
         self.inner.flush()
@@ -311,7 +152,7 @@ mod tests {
     use hex_literal::hex;
 
     use super::*;
-    use crate::{ErrorCorrection, reed_solomon};
+    use crate::{ErrorCorrection, Prefilter, reed_solomon};
 
     // Specification: Appendix A.1 Minimal File
     #[test]

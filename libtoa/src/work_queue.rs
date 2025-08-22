@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    sync::{atomic::AtomicBool, Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, atomic::AtomicBool},
 };
 
 /// A work-stealing queue that supports multiple workers taking work from a shared queue.
@@ -50,7 +50,7 @@ impl<T> WorkStealingQueue<T> {
             queue.push_back(item);
         }
 
-        // Notify one waiting worker
+        // Notify one waiting worker.
         self.inner.condvar.notify_one();
         true
     }
@@ -61,7 +61,7 @@ impl<T> WorkStealingQueue<T> {
         self.inner
             .closed
             .store(true, core::sync::atomic::Ordering::Release);
-        // Wake up all waiting workers so they can check the closed status
+        // Wake up all waiting workers so they can check the closed status.
         self.inner.condvar.notify_all();
     }
 

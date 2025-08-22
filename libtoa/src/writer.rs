@@ -1,7 +1,9 @@
 mod ecc_writer;
 mod streaming_writer;
+mod block_writer;
 
 pub use streaming_writer::TOAStreamingWriter;
+pub use block_writer::TOABlockWriter;
 
 use crate::{
     ErrorCorrection, Prefilter, lzma,
