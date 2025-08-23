@@ -179,6 +179,15 @@ TOA combines proven technologies in a novel way:
 - **Streaming architecture**: Process data without seeking or buffering
 - **Block independence**: Each block can be verified and recovered separately
 
+## Roadmap
+
+- Repair command
+    - Single file: Use ECC to repair file
+    - Multiple files: Use different, potentially corrupted version of a file (for example from different media) and
+      try to repair both of them by using incremental repair routines.
+- Extending the libtoa (Rust) library to support more use-cases
+- Add a C interface and provide static / dynamic libraries to link against (for natively supporting more languages)
+
 ## Acknowledgement
 
 - The lzma code is a hard copy of the lzma-rust crate (Apache 2 license).

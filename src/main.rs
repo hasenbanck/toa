@@ -9,7 +9,7 @@ use clap::{Arg, ArgMatches, Command, value_parser};
 use libtoa::{ErrorCorrection, Prefilter};
 
 use crate::{
-    compression::compress_file, decompression::decompress_file, list::list_file_info,
+    compression::compress_file, decompression::{decompress_file, test_file}, list::list_file_info,
     util::format_size,
 };
 
@@ -18,6 +18,7 @@ struct Cli {
     output: Option<String>,
     extract: bool,
     list: bool,
+    test: bool,
     keep: bool,
     verbose: bool,
     preset: u32,
@@ -66,6 +67,12 @@ impl Cli {
                     .help("List information about the TOA file")
                     .short('l')
                     .long("list")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("test")
+                    .help("Test decompression without storing output")
+                    .long("test")
                     .action(clap::ArgAction::SetTrue),
             )
             .arg(
@@ -313,6 +320,7 @@ impl Cli {
             output: matches.get_one::<String>("output").cloned(),
             extract: matches.get_flag("extract"),
             list: matches.get_flag("list"),
+            test: matches.get_flag("test"),
             keep: matches.get_flag("keep"),
             verbose: matches.get_flag("verbose"),
             preset,
@@ -402,6 +410,39 @@ fn main() -> Result<()> {
             eprintln!("Error: Can't list file content: {error}");
             process::exit(1);
         }
+    } else if cli.test {
+        // Test mode - decompress without storing output.
+        let (compressed_size, uncompressed_size, elapsed) =
+            match test_file(&cli) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("Error: Can't test file: {error}");
+                    process::exit(1);
+                }
+            };
+
+        if cli.verbose {
+            let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+                (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
+            } else {
+                0.0
+            };
+
+            println!("Compressed:   {}", format_size(compressed_size));
+            println!("Uncompressed: {}", format_size(uncompressed_size));
+            println!(
+                "Compression ratio: {:.2}%",
+                if uncompressed_size > 0 {
+                    (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                } else {
+                    0.0
+                },
+            );
+            println!("Test time: {:.3}s", elapsed.as_secs_f64(),);
+            println!("Test speed: {speed_mibs:.1} MiB/s");
+        }
+
+        println!("Test completed successfully");
     } else if cli.extract {
         // Extraction mode.
         let output_filename = cli.output.clone().unwrap_or_else(|| {
