@@ -6,7 +6,7 @@ homepage = "https://github.com/hasenbanck/toa/"
 repository = "https://github.com/hasenbanck/toa/"
 documentation = "https://docs.rs/libtoa/latest/libtoa/"
 license = "Apache-2.0"
-version = "0.2.0"
+version = "0.2.1"
 keywords = ["lzma", "toa", "compression", "streaming"]
 edition = "2024"
 rust-version = "1.89"
@@ -25,5 +25,5 @@ std = []
 optimization = ["std"]
 
 [package.metadata.docs.rs]
-features = ["blake3", "std", "optimization"]
+features = ["std", "optimization"]
 rustdoc-args = ["--cfg", "docsrs"]

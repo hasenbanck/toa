@@ -1,5 +1,8 @@
 # libtoa
 
+[![Crate](https://img.shields.io/crates/v/libtoa.svg)](https://crates.io/crates/libtoa)
+[![Documentation](https://docs.rs/libtoa/badge.svg)](https://docs.rs/libtoa)
+
 Library to compress & decompress TOA files (.toa).
 
 **Note: The TOA format is currently in draft mode (v0.7) and not yet frozen. The specification may change in future

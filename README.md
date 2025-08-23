@@ -1,5 +1,7 @@
 # TOA - Modern Compression with Built-in Error Correction
 
+[![Crate](https://img.shields.io/crates/v/toa.svg)](https://crates.io/crates/toa)
+
 **TOA** is a next-generation compression format that combines **exceptional compression ratios** with **built-in error
 correction**, **streaming operation**, and **parallel processing**. TOA provides unique resilience against data
 corruption while maintaining competitive compression performance. Especially useful to guard important archival data
