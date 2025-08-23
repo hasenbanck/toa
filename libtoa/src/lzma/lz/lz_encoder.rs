@@ -62,6 +62,7 @@ pub(crate) struct LZEncoderData {
     pub(crate) nice_len: u32,
     pub(crate) buf: Vec<u8>,
     pub(crate) buf_size: usize,
+    #[cfg(feature = "optimization")]
     pub(crate) buf_limit_u16: usize,
     pub(crate) read_pos: i32,
     pub(crate) read_limit: i32,
@@ -139,6 +140,7 @@ impl LZEncoder {
         );
         let buf_size = buf_size as usize;
         let buf = vec![0; buf_size];
+        #[cfg(feature = "optimization")]
         let buf_limit_u16 = buf_size.checked_sub(size_of::<u16>()).unwrap();
 
         let keep_size_before = extra_size_before + dict_size;
@@ -152,6 +154,7 @@ impl LZEncoder {
                 nice_len,
                 buf,
                 buf_size,
+                #[cfg(feature = "optimization")]
                 buf_limit_u16,
                 read_pos: -1,
                 read_limit: -1,

@@ -25,5 +25,5 @@ name = "toa"
 path = "src/main.rs"
 
 [dependencies]
-libtoa = { version = "0.2", default-features = false, features = ["std"], path = "libtoa" }
+libtoa = { version = "0.2", default-features = false, features = ["std", "optimization"], path = "libtoa" }
 clap = { workspace = true }
