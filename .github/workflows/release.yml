@@ -36,7 +36,7 @@ jobs:
           gzip --keep toa
           mv toa.gz toa-linux-x86_64.gz
           b3sum toa-linux-x86_64.gz > toa-linux-x86_64.gz.b3
-          ./toa --preset 6 --ecc light --keep toa
+          ./toa --keep toa
           mv toa.toa toa-linux-x86_64.toa
           b3sum toa-linux-x86_64.toa > toa-linux-x86_64.toa.b3
 
@@ -88,7 +88,7 @@ jobs:
         run: |
           Compress-Archive -Path toa.exe -DestinationPath toa-windows-x86_64.zip
           b3sum toa-windows-x86_64.zip | Out-File -FilePath toa-windows-x86_64.zip.b3 -Encoding ASCII
-          ./toa.exe --preset 6 --ecc light --keep toa.exe
+          ./toa.exe --keep toa.exe
           Rename-Item -Path toa.exe.toa -NewName toa-windows-x86_64.toa
           b3sum toa-windows-x86_64.toa | Out-File -FilePath toa-windows-x86_64.toa.b3 -Encoding ASCII
         shell: powershell
@@ -141,7 +141,7 @@ jobs:
           gzip --keep toa
           mv toa.gz toa-macos-aarch64.gz
           b3sum toa-macos-aarch64.gz > toa-macos-aarch64.gz.b3
-          ./toa --preset 6 --ecc light --keep toa
+          ./toa --keep toa
           mv toa.toa toa-macos-aarch64.toa
           b3sum toa-macos-aarch64.toa > toa-macos-aarch64.toa.b3
 
