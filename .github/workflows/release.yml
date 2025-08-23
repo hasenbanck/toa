@@ -22,6 +22,7 @@ jobs:
         with:
           toolchain: stable
           targets: x86_64-unknown-linux-gnu
+          components: llvm-tools-preview
 
       - name: Install cargo-pgo and b3sum
         run: |
@@ -80,8 +81,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # PGO inside the GitHub Runner currently segfaults, even with 100% safe Rust. Reason unknown. Can't replicate locally.
+      #      - name: Build with PGO
+      #        run: ./build-release.sh
+      #        shell: bash
+
       - name: Build with PGO
-        run: ./build-release.sh
+        run: cargo build --release && mv ./target/release/toa ./toa
         shell: bash
 
       - name: Compress binary
