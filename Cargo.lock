@@ -87,7 +87,7 @@ checksum = "bcaaec4551594c969335c98c903c1397853d4198408ea609190f420500f6be71"
 
 [[package]]
 name = "libtoa"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "hex-literal",
@@ -101,7 +101,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "toa"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "libtoa",
