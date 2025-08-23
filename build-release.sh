@@ -61,14 +61,14 @@ TARGET_SPECIFIC="$TARGET_DIR/$RUST_TARGET/release"
 BIN="$TARGET_SPECIFIC/$BINARY_NAME$EXT"
 
 # Step 4: Run compression and decompression to create a PGO profile
-"$BIN" --threads=4 --preset 6 --keep "$KERNEL_TAR"
-"$BIN" --threads=4 --decompress --keep "$KERNEL_TAR.toa"
-"$BIN" --threads=4 --preset 1 --ecc light --keep tests/data/executable.exe
-"$BIN" --threads=4 --decompress --keep tests/data/executable.exe.toa
-"$BIN" --threads=4 --preset 3 --ecc medium --keep tests/data/executable.exe
-"$BIN" --threads=4 --decompress --keep tests/data/executable.exe.toa
-"$BIN" --threads=4 --preset 4 --ecc heavy --keep tests/data/executable.exe
-"$BIN" --threads=4 --decompress --keep tests/data/executable.exe.toa
+"$BIN" --threads=2 --preset 6 --keep "$KERNEL_TAR"
+"$BIN" --threads=2 --decompress --keep "$KERNEL_TAR.toa"
+"$BIN" --threads=2 --preset 1 --ecc light --keep tests/data/executable.exe
+"$BIN" --threads=2 --decompress --keep tests/data/executable.exe.toa
+"$BIN" --threads=2 --preset 3 --ecc medium --keep tests/data/executable.exe
+"$BIN" --threads=2 --decompress --keep tests/data/executable.exe.toa
+"$BIN" --threads=2 --preset 4 --ecc heavy --keep tests/data/executable.exe
+"$BIN" --threads=2 --decompress --keep tests/data/executable.exe.toa
 
 # Step 5: Optimize with PGO
 cargo pgo optimize
