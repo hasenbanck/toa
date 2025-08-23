@@ -39,9 +39,9 @@ impl<R: Read> ECCDecoder<R> {
     pub(crate) fn new(inner: R, error_correction: ErrorCorrection, validate_rs: bool) -> Self {
         let (decode_fn, uses_buffer) = match error_correction {
             ErrorCorrection::None => (decode_none as DecodeFunction<R>, false),
-            ErrorCorrection::Light => (decode_light as DecodeFunction<R>, true),
-            ErrorCorrection::Medium => (decode_medium as DecodeFunction<R>, true),
-            ErrorCorrection::Heavy => (decode_heavy as DecodeFunction<R>, true),
+            ErrorCorrection::Standard => (decode_light as DecodeFunction<R>, true),
+            ErrorCorrection::Paranoid => (decode_medium as DecodeFunction<R>, true),
+            ErrorCorrection::Extreme => (decode_heavy as DecodeFunction<R>, true),
         };
 
         let codeword_buffer = match uses_buffer {

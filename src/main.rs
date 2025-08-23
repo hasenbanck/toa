@@ -188,11 +188,11 @@ impl Cli {
             )
             .arg(
                 Arg::new("ecc")
-                    .help("Error correction level for data protection")
+                    .help("Error correction level for data protection. Use Standard unless you have a specific reason not to. It handles all normal storage degradation for decades. Paranoid and Extreme are for specialized scenarios like single-copy archives on sketchy media or century-scale preservation.")
                     .long("ecc")
                     .value_name("LEVEL")
-                    .value_parser(["none", "light", "medium", "heavy"])
-                    .default_value("none"),
+                    .value_parser(["none", "standard", "paranoid", "extreme"])
+                    .default_value("standard"),
             )
             .arg(
                 Arg::new("preset")
@@ -333,10 +333,10 @@ impl Cli {
             dict_size: matches.get_one::<u8>("dict-size").copied(),
             ecc: match matches.get_one::<String>("ecc").unwrap().as_str() {
                 "none" => ErrorCorrection::None,
-                "light" => ErrorCorrection::Light,
-                "medium" => ErrorCorrection::Medium,
-                "heavy" => ErrorCorrection::Heavy,
-                _ => ErrorCorrection::None,
+                "standard" => ErrorCorrection::Standard,
+                "paranoid" => ErrorCorrection::Paranoid,
+                "extreme" => ErrorCorrection::Extreme,
+                _ => ErrorCorrection::Standard,
             },
         }
     }

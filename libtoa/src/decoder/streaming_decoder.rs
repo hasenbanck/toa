@@ -309,17 +309,17 @@ mod tests {
     }
 
     #[test]
-    fn test_round_trip_light_ecc() {
-        test_ecc_round_trip(crate::ErrorCorrection::Light, 400, 1);
+    fn test_round_trip_standard_ecc() {
+        test_ecc_round_trip(crate::ErrorCorrection::Standard, 400, 1);
     }
 
     #[test]
-    fn test_round_trip_medium_ecc() {
-        test_ecc_round_trip(crate::ErrorCorrection::Medium, 350, 7);
+    fn test_round_trip_paranoid_ecc() {
+        test_ecc_round_trip(crate::ErrorCorrection::Paranoid, 350, 7);
     }
 
     #[test]
-    fn test_round_trip_heavy_ecc() {
-        test_ecc_round_trip(crate::ErrorCorrection::Heavy, 300, 11);
+    fn test_round_trip_extreme_ecc() {
+        test_ecc_round_trip(crate::ErrorCorrection::Extreme, 300, 11);
     }
 }

@@ -187,9 +187,9 @@ One byte indicating optional features and protection levels:
 
 - **Bits 0-1**: Data protection level
     - `0b00`: None (metadata only)
-    - `0b01`: Light - RS(255,239), 6.3% overhead, 8-byte correction capability
-    - `0b10`: Medium - RS(255,223), 12.5% overhead, 16-byte correction capability
-    - `0b11`: Heavy - RS(255,191), 25% overhead, 32-byte correction capability
+    - `0b01`: Standard - RS(255,239), 6.3% overhead, 8-byte correction capability
+    - `0b10`: Paranoid - RS(255,223), 12.5% overhead, 16-byte correction capability
+    - `0b11`: Extreme - RS(255,191), 25% overhead, 32-byte correction capability
 - **Bits 2-7**: MUST be zero (reserved for future use)
 
 When data protection is enabled (bits 0-1 ≠ 0b00), compressed block data MUST be encoded with Reed-Solomon protection as
@@ -383,9 +383,9 @@ For each codeword:
 
 The protection level determines the codeword structure:
 
-- Light: MUST use 239 data bytes + 16 parity bytes (can correct 8 bytes per codeword)
-- Medium: MUST use 223 data bytes + 32 parity bytes (can correct 16 bytes per codeword)
-- Heavy: MUST use 191 data bytes + 64 parity bytes (can correct 32 bytes per codeword)
+- Standard: MUST use 239 data bytes + 16 parity bytes (can correct 8 bytes per codeword)
+- Paranoid: MUST use 223 data bytes + 32 parity bytes (can correct 16 bytes per codeword)
+- Extreme: MUST use 191 data bytes + 64 parity bytes (can correct 32 bytes per codeword)
 
 All protection levels MUST use the same field parameters as metadata protection:
 

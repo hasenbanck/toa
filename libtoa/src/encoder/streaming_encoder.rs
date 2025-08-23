@@ -393,27 +393,27 @@ mod tests {
     }
 
     #[test]
-    fn test_toa_encoder_with_light_error_correction() {
+    fn test_toa_encoder_with_standard_error_correction() {
         test_toa_encoder_with_error_correction(
-            ErrorCorrection::Light,
+            ErrorCorrection::Standard,
             0b01,
             reed_solomon::code_255_239::decode,
         );
     }
 
     #[test]
-    fn test_toa_encoder_with_medium_error_correction() {
+    fn test_toa_encoder_with_paranoid_error_correction() {
         test_toa_encoder_with_error_correction(
-            ErrorCorrection::Medium,
+            ErrorCorrection::Paranoid,
             0b10,
             reed_solomon::code_255_223::decode,
         );
     }
 
     #[test]
-    fn test_toa_encoder_with_heavy_error_correction() {
+    fn test_toa_encoder_with_extreme_error_correction() {
         test_toa_encoder_with_error_correction(
-            ErrorCorrection::Heavy,
+            ErrorCorrection::Extreme,
             0b11,
             reed_solomon::code_255_191::decode,
         );

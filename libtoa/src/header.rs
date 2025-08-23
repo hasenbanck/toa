@@ -39,9 +39,9 @@ impl TOAHeader {
     pub fn error_correction(&self) -> ErrorCorrection {
         match self.capabilities & 0b11 {
             0b00 => ErrorCorrection::None,
-            0b01 => ErrorCorrection::Light,
-            0b10 => ErrorCorrection::Medium,
-            0b11 => ErrorCorrection::Heavy,
+            0b01 => ErrorCorrection::Standard,
+            0b10 => ErrorCorrection::Paranoid,
+            0b11 => ErrorCorrection::Extreme,
             _ => unreachable!(),
         }
     }

@@ -36,9 +36,9 @@ impl<W: Write> ECCEncoder<W> {
     pub(crate) fn new(inner: W, error_correction: ErrorCorrection) -> Self {
         let (encode_fn, uses_buffer) = match error_correction {
             ErrorCorrection::None => (encode_none as EncodeFunction<W>, false),
-            ErrorCorrection::Light => (encode_light as EncodeFunction<W>, true),
-            ErrorCorrection::Medium => (encode_medium as EncodeFunction<W>, true),
-            ErrorCorrection::Heavy => (encode_heavy as EncodeFunction<W>, true),
+            ErrorCorrection::Standard => (encode_light as EncodeFunction<W>, true),
+            ErrorCorrection::Paranoid => (encode_medium as EncodeFunction<W>, true),
+            ErrorCorrection::Extreme => (encode_heavy as EncodeFunction<W>, true),
         };
 
         Self {
@@ -140,9 +140,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ec_encoder_light_encoding() {
+    fn test_ec_encoder_standard_encoding() {
         let mut output = Vec::new();
-        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Light);
+        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Standard);
 
         let test_data = b"Hello, Reed-Solomon encoding!";
         ec_encoder.write_all(test_data).unwrap();
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_ec_encoder_multiple_codewords() {
         let mut output = Vec::new();
-        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Light);
+        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Standard);
 
         let mut test_data = Vec::new();
         test_data.extend_from_slice(b"A".repeat(300).as_slice());

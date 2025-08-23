@@ -23,16 +23,16 @@ in [SPECIFICATION.md](SPECIFICATION.md).
 
 Benchmark results for `toa.exe` (903K original):
 
-| Format               | Size     | Compression | Notes                                         |
-|----------------------|----------|-------------|-----------------------------------------------|
-| **TOA (no ECC)**     | **294K** | **67.4%**   | Best compression, maximum resilience metadata |
-| **XZ**               | **294K** | **67.4%**   | Reference compression                         |
-| **TOA (light ECC)**  | **314K** | **65.2%**   | Light error correction                        |
-| **TOA (medium ECC)** | **336K** | **62.8%**   | **Better than gz/zst with strong ECC**        |
-| **TOA (heavy ECC)**  | **392K** | **56.6%**   | Maximum error correction                      |
-| gzip -9              | 367K     | 59.4%       | Traditional compression                       |
-| zstd -9              | 356K     | 60.6%       | Modern compression                            |
-| zstd -3              | 377K     | 58.3%       | Fast compression                              |
+| Format                 | Size | Compression | Notes                                     |
+|------------------------|------|-------------|-------------------------------------------|
+| **TOA (extreme ECC)**  | 392K | 56.6%       | Extreme error correction                  |
+| **TOA (paranoid ECC)** | 336K | 62.8%       | Paranoid error correction                 |
+| **TOA (standard ECC)** | 314K | 65.2%       | Standard error correction                 |
+| **TOA (no ECC)**       | 294K | 67.4%       | Best compression, only metadata protected |
+| XZ                     | 294K | 67.4%       | Reference compression                     |
+| zstd -9                | 356K | 60.6%       | Modern compression                        |
+| zstd -3                | 377K | 58.3%       | Fast compression                          |
+| gzip -9                | 367K | 59.4%       | Traditional compression                   |
 
 **TOA delivers XZ-level compression with unique, built-in error correction capabilities that no other format provides.**
 
@@ -65,9 +65,8 @@ cargo build --release
 toa input.txt
 # → Creates input.txt.toa
 
-# Compress with error correction
-toa --ecc medium input.txt
-# → Adds 6.3% overhead but can correct 8 bytes per 255-byte block
+# Compress with no error correction for the data
+toa --ecc none input.txt
 ```
 
 ### Decompression
@@ -105,15 +104,21 @@ toa -9 largefile.bin
 
 ### Error Correction Levels
 
+Use Standard unless you have a specific reason not to. It handles all normal storage degradation for decades. Paranoid
+and Extreme are for specialized scenarios like single-copy archives on sketchy media or century-scale preservation.
+
 ```bash
-# Light ECC: 6.3% overhead, corrects 8 bytes per 255-byte block
-toa --ecc light input.txt
+# Standard ECC: 6.3% overhead, corrects 8 bytes per 255-byte block (default)
+toa --ecc standard input.txt
 
-# Medium ECC: 12.5% overhead, corrects 16 bytes per 255-byte block  
-toa --ecc medium input.txt
+# Paranoid ECC: 12.5% overhead, corrects 16 bytes per 255-byte block  
+toa --ecc paranoid input.txt
 
-# Heavy ECC: 25% overhead, corrects 32 bytes per 255-byte block
-toa --ecc heavy input.txt
+# Extreme ECC: 25% overhead, corrects 32 bytes per 255-byte block
+toa --ecc extreme input.txt
+
+# No ECC: Only metadata is protected
+toa --ecc none input.txt
 ```
 
 ### Executable Compression with BCJ Filters
@@ -173,19 +178,6 @@ TOA combines proven technologies in a novel way:
 - **Reed-Solomon error correction**: Multi-layer protection against corruption
 - **Streaming architecture**: Process data without seeking or buffering
 - **Block independence**: Each block can be verified and recovered separately
-
-## Error Correction Demonstration
-
-TOA's Reed-Solomon codes can recover from significant corruption:
-
-```bash
-# Create a file with medium error correction
-toa --ecc medium important-data.txt
-
-# Simulate corruption (up to 16 bytes per 255-byte block can be recovered)
-# TOA can automatically detect and correct the corruption during decompression
-toa -d important-data.txt.toa
-```
 
 ## Acknowledgement
 
