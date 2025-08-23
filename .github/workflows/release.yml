@@ -65,7 +65,7 @@ jobs:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
 
-      - name: Install b3sum
+      - name: Install cargo-pgo and b3sum
         run: |
           cargo install cargo-pgo
           cargo install b3sum
@@ -107,9 +107,8 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-darwin
 
-      - name: Install cargo-pgo and b3sum
+      - name: Install b3sum
         run: |
-          cargo install cargo-pgo
           cargo install b3sum
 
       # PGO inside the GitHub Runner currently segfaults, even with 100% safe Rust.
