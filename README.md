@@ -3,11 +3,11 @@
 **TOA** is a next-generation compression format that combines **exceptional compression ratios** with **built-in error
 correction**, **streaming operation**, and **parallel processing**. TOA provides unique resilience against data
 corruption while maintaining competitive compression performance. Especially useful to guard important archival data
-against bit rot.
+against bit rot. It uses LZMA2s, a special variant of LZMA as it's compression algorithm.
 
 ## Key Features
 
-- **Excellent Compression**: Matches XZ compression ratios and beats gzip and zstd
+- **Excellent Compression**: Matches XZ compression ratios and beats gzip and zstd (uses LZMA internally)
 - **Built-in Error Correction**: Reed-Solomon codes protect against data corruption
 - **Cryptographic Integrity**: BLAKE3 hashing for tamper detection
 - **Streaming & Parallel**: Process data as it arrives with multi-core support
