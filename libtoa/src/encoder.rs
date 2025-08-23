@@ -89,6 +89,8 @@ impl TOAOptions {
     ///  - Preset 7:  64 MiB
     ///  - Preset 8: 128 MiB
     ///  - Preset 9: 256 MiB
+    ///
+    /// Block size is set to the dictionary size.
     pub fn from_preset(preset: u32) -> Self {
         let preset = preset.min(9);
 
@@ -97,8 +99,7 @@ impl TOAOptions {
         let lc = 3;
         let lp = 0;
         let pb = 2;
-        let dictionary_size_log2 = Self::PRESET_TO_DICT_SIZE_LOG2[preset as usize];
-        let block_size_exponent = None; // Single block mode
+        let dictionary_size_exponent = Self::PRESET_TO_DICT_SIZE_LOG2[preset as usize];
 
         let mode;
         let mf;
@@ -126,7 +127,7 @@ impl TOAOptions {
         Self {
             prefilter,
             error_correction,
-            dictionary_size_exponent: dictionary_size_log2,
+            dictionary_size_exponent,
             lc,
             lp,
             pb,
@@ -134,7 +135,7 @@ impl TOAOptions {
             nice_len,
             mf,
             depth_limit,
-            block_size_exponent,
+            block_size_exponent: Some(dictionary_size_exponent),
         }
     }
 

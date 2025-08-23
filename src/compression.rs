@@ -63,9 +63,17 @@ pub(crate) fn compress_file(
         let calculated_exponent = calculate_block_size_exponent(file_size, block_count);
         options = options.with_block_size_exponent(calculated_exponent);
     } else {
-        // Default behavior: set block size to match dictionary size of the selected preset.
-        let dict_size_log2 = options.dict_size_exponent();
-        options = options.with_block_size_exponent(Some(dict_size_log2));
+        // Default behavior: set block size to match dictionary size.
+        let dict_size_exponent = options.dict_size_exponent();
+
+        // For very large files slightly larger blocks for better compression.
+        let adjusted_block_size = if file_size > (256 << 20) {
+            (dict_size_exponent + 1).min(30) // Max 1GB blocks
+        } else {
+            dict_size_exponent
+        };
+
+        options = options.with_block_size_exponent(Some(adjusted_block_size));
     }
 
     options = options.with_error_correction(cli.ecc);

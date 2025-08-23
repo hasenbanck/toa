@@ -9,8 +9,7 @@ fn test_encode_with_dict_size(dict_size: u8, expected_blocks: u64) {
         .with_dictionary_exponent(dict_size)
         .with_block_size_exponent(Some(dict_size));
 
-    let mut encoder =
-        TOAFileEncoder::new("tests/data/wget-sparc", options, max_threads).unwrap();
+    let mut encoder = TOAFileEncoder::new("tests/data/wget-sparc", options, max_threads).unwrap();
 
     let mut compressed = Vec::new();
     encoder.read_to_end(&mut compressed).unwrap();

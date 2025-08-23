@@ -43,6 +43,7 @@ impl Cli {
     fn build_command() -> Command {
         Command::new("toa")
             .about("Compress and decompress files using the TOA compression file format")
+            .long_about("TOA compression format optimized for streaming, parallelization, and error correction.\n\nUSAGE RECOMMENDATIONS:\n• Use preset 6 (default)\n• Files >1 GiB: Use presets 7-9 for maximum compression\n• Block size automatically matches dictionary size for optimal performance")
             .version(env!("CARGO_PKG_VERSION"))
             .arg_required_else_help(true)
             .arg(
@@ -90,7 +91,7 @@ impl Cli {
             )
             .arg(
                 Arg::new("block-size")
-                    .help("Block size as power of 2 (0, 16-62, e.g., 26 = 64MiB). Use 0 for maximum block size. Default: matches dictionary size of selected preset.")
+                    .help("Block size as power of 2 (0, 16-62, e.g., 26 = 64 MiB). Use 0 for maximum block size. Default: matches dictionary size of selected preset. For files >256 MiB, block size is automatically increased by 1 for better compression.")
                     .long("block-size")
                     .value_name("N")
                     .value_parser(value_parser!(u8).range(0..=62)),
@@ -105,7 +106,7 @@ impl Cli {
             )
             .arg(
                 Arg::new("threads")
-                    .help("Number of threads to use for multithreaded compression / decompression (0 = automatic, defaults to number of CPU cores)")
+                    .help("Number of threads to use for multithreaded compression / decompression (0 = automatic, defaults to number of CPU cores). Higher thread counts benefit from smaller block sizes for better parallelization.")
                     .short('t')
                     .long("threads")
                     .value_name("N")
@@ -180,7 +181,7 @@ impl Cli {
             )
             .arg(
                 Arg::new("dict-size")
-                    .help("Dictionary size as power of 2 (16-30, e.g., 26 = 64MiB)")
+                    .help("Dictionary size as power of 2 (16-30, e.g., 26 = 64 MiB)")
                     .long("dict-size")
                     .value_name("N")
                     .value_parser(value_parser!(u8).range(16..=30)),
@@ -195,7 +196,7 @@ impl Cli {
             )
             .arg(
                 Arg::new("preset")
-                    .help("Compression preset level (0-9, higher is better compression)")
+                    .help("Compression preset level (0-9, higher is better compression). Recommended: In general 6. Higher for files larger than 128 MiB.")
                     .short('p')
                     .long("preset")
                     .value_parser(value_parser!(u32).range(0..=9))
@@ -203,93 +204,79 @@ impl Cli {
             )
             .arg(
                 Arg::new("0")
-                    .help("Compression preset level 0 (fastest)")
+                    .help("Compression preset level 0 (ultra-fast, lowest compression)")
                     .short('0')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "1", "2", "3", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "1", "2", "3", "4", "5", "6", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("1")
                     .help("Compression preset level 1")
                     .short('1')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "2", "3", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "2", "3", "4", "5", "6", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("2")
                     .help("Compression preset level 2")
                     .short('2')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "3", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "3", "4", "5", "6", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("3")
                     .help("Compression preset level 3")
                     .short('3')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "4", "5", "6", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "4", "5", "6", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("4")
                     .help("Compression preset level 4")
                     .short('4')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "5", "6", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "5", "6", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("5")
                     .help("Compression preset level 5")
                     .short('5')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "6", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "6", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("6")
-                    .help("Compression preset level 6 (default)")
+                    .help("Compression preset level 6 (default, maximum compression)")
                     .short('6')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "7", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "7", "8", "9"]),
             )
             .arg(
                 Arg::new("7")
-                    .help("Compression preset level 7")
+                    .help("Compression preset level 7 (for files larger than 128 MiB)")
                     .short('7')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "8", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "8", "9"]),
             )
             .arg(
                 Arg::new("8")
-                    .help("Compression preset level 8")
+                    .help("Compression preset level 8 (for files larger than 256 MiB)")
                     .short('8')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "9", "fastest", "best"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "9"]),
             )
             .arg(
                 Arg::new("9")
-                    .help("Compression preset level 9 (best compression)")
+                    .help("Compression preset level 9 (for files larger than 512 MiB)")
                     .short('9')
                     .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "fastest", "best"]),
-            )
-            .arg(
-                Arg::new("fastest")
-                    .help("Fastest compression (same as -0)")
-                    .long("fastest")
-                    .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "best"]),
-            )
-            .arg(
-                Arg::new("best")
-                    .help("Best compression (same as -9)")
-                    .long("best")
-                    .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "fastest"]),
+                    .conflicts_with_all(["preset", "0", "1", "2", "3", "4", "5", "6", "7", "8"]),
             )
     }
 
     fn from_matches(matches: &ArgMatches) -> Self {
         // Determine preset from shorthand flags or explicit preset.
-        let preset = if matches.get_flag("0") || matches.get_flag("fastest") {
+        let preset = if matches.get_flag("0") {
             0
         } else if matches.get_flag("1") {
             1
@@ -307,7 +294,7 @@ impl Cli {
             7
         } else if matches.get_flag("8") {
             8
-        } else if matches.get_flag("9") || matches.get_flag("best") {
+        } else if matches.get_flag("9") {
             9
         } else {
             *matches.get_one::<u32>("preset").unwrap()
