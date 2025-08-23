@@ -1,4 +1,4 @@
-use std::{fs, fs::File, time::Instant, io::Write};
+use std::{fs, fs::File, io::Write, time::Instant};
 
 use libtoa::{TOAFileDecoder, copy_wide};
 
@@ -22,9 +22,7 @@ pub(crate) fn decompress_file(
     Ok((compressed_size, decompressed_size, elapsed))
 }
 
-pub(crate) fn test_file(
-    cli: &Cli,
-) -> std::io::Result<(u64, u64, std::time::Duration)> {
+pub(crate) fn test_file(cli: &Cli) -> std::io::Result<(u64, u64, std::time::Duration)> {
     let compressed_size = fs::metadata(&cli.input)?.len();
 
     let mut toa_decoder = TOAFileDecoder::new(&cli.input, cli.threads, true)?;
@@ -32,12 +30,12 @@ pub(crate) fn test_file(
     let start_time = Instant::now();
 
     struct NullWriter;
-    
+
     impl Write for NullWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             Ok(buf.len())
         }
-        
+
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }

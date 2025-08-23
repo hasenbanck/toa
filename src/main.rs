@@ -9,7 +9,9 @@ use clap::{Arg, ArgMatches, Command, value_parser};
 use libtoa::{ErrorCorrection, Prefilter};
 
 use crate::{
-    compression::compress_file, decompression::{decompress_file, test_file}, list::list_file_info,
+    compression::compress_file,
+    decompression::{decompress_file, test_file},
+    list::list_file_info,
     util::format_size,
 };
 
@@ -412,14 +414,13 @@ fn main() -> Result<()> {
         }
     } else if cli.test {
         // Test mode - decompress without storing output.
-        let (compressed_size, uncompressed_size, elapsed) =
-            match test_file(&cli) {
-                Ok(result) => result,
-                Err(error) => {
-                    eprintln!("Error: Can't test file: {error}");
-                    process::exit(1);
-                }
-            };
+        let (compressed_size, uncompressed_size, elapsed) = match test_file(&cli) {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("Error: Can't test file: {error}");
+                process::exit(1);
+            }
+        };
 
         if cli.verbose {
             let speed_mibs = if elapsed.as_secs_f64() > 0.0 {

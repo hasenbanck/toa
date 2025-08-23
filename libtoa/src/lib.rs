@@ -48,9 +48,9 @@ pub(crate) use std::io::Read;
 pub(crate) use std::io::Write;
 
 pub use cv_stack::CVStack;
-pub use decoder::TOAStreamingDecoder;
 #[cfg(feature = "std")]
 pub use decoder::TOAFileDecoder;
+pub use decoder::TOAStreamingDecoder;
 #[cfg(feature = "std")]
 pub use encoder::TOAFileEncoder;
 pub use encoder::{TOABlockWriter, TOAOptions, TOAStreamingEncoder};
