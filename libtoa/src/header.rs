@@ -149,8 +149,8 @@ impl TOAHeader {
         })
     }
 
-    /// Write the header to a writer.
-    pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+    /// Write the header to a encoder.
+    pub fn write<W: Write>(&self, mut encoder: W) -> crate::Result<()> {
         let mut data_bytes = [0u8; 10];
 
         data_bytes[0..4].copy_from_slice(&TOA_MAGIC);
@@ -168,7 +168,7 @@ impl TOAHeader {
         header_bytes[..10].copy_from_slice(&data_bytes);
         header_bytes[10..].copy_from_slice(&parity_bytes);
 
-        writer.write_all(&header_bytes)
+        encoder.write_all(&header_bytes)
     }
 }
 
@@ -271,14 +271,14 @@ impl TOABlockHeader {
         (self.physical_size_with_flags & (1u64 << 62)) != 0
     }
 
-    /// Write the block header to a writer.
-    pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+    /// Write the block header to a encoder.
+    pub fn write<W: Write>(&self, mut encoder: W) -> crate::Result<()> {
         let mut header_bytes = [0u8; 64];
         header_bytes[0..8].copy_from_slice(&self.physical_size_with_flags.to_be_bytes());
         header_bytes[8..40].copy_from_slice(&self.blake3_hash);
         header_bytes[40..64].copy_from_slice(&self.rs_parity);
 
-        writer.write_all(&header_bytes)
+        encoder.write_all(&header_bytes)
     }
 }
 

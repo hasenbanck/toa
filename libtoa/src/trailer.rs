@@ -86,14 +86,14 @@ impl TOAFileTrailer {
         })
     }
 
-    /// Write the trailer to a writer.
-    pub fn write<W: Write>(&self, mut writer: W) -> crate::Result<()> {
+    /// Write the trailer to a encoder.
+    pub fn write<W: Write>(&self, mut encoder: W) -> crate::Result<()> {
         let mut trailer_bytes = [0u8; 64];
         trailer_bytes[0..8].copy_from_slice(&self.total_uncompressed_size_with_flags.to_be_bytes());
         trailer_bytes[8..40].copy_from_slice(&self.blake3_hash);
         trailer_bytes[40..64].copy_from_slice(&self.rs_parity);
 
-        writer.write_all(&trailer_bytes)
+        encoder.write_all(&trailer_bytes)
     }
 }
 

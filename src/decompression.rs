@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use libtoa::TOAStreamingReader;
+use libtoa::TOAStreamingDecoder;
 
 use crate::Cli;
 
@@ -15,11 +15,11 @@ pub(crate) fn decompress_file(
     let input_file = File::open(&cli.input)?;
     let compressed_size = input_file.metadata()?.len();
 
-    let reader = BufReader::with_capacity(64 << 10, input_file);
-    let mut toa_reader = TOAStreamingReader::new(reader, true);
+    let decoder = BufReader::with_capacity(64 << 10, input_file);
+    let mut toa_decoder = TOAStreamingDecoder::new(decoder, true);
 
     let output_file = File::create(output_path)?;
-    let mut output_writer = BufWriter::with_capacity(64 << 10, output_file);
+    let mut output_encoder = BufWriter::with_capacity(64 << 10, output_file);
 
     let start_time = Instant::now();
 
@@ -27,16 +27,16 @@ pub(crate) fn decompress_file(
     let mut total_written = 0u64;
 
     loop {
-        match toa_reader.read(&mut buffer)? {
+        match toa_decoder.read(&mut buffer)? {
             0 => break,
             n => {
-                output_writer.write_all(&buffer[..n])?;
+                output_encoder.write_all(&buffer[..n])?;
                 total_written += n as u64;
             }
         }
     }
 
-    output_writer.flush()?;
+    output_encoder.flush()?;
     let elapsed = start_time.elapsed();
 
     Ok((compressed_size, total_written, elapsed))

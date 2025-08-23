@@ -5,33 +5,33 @@ use crate::{
     reed_solomon::{code_255_191, code_255_223, code_255_239},
 };
 
-type EncodeFunction<W> = fn(&mut ECCWriter<W>, &[u8]) -> Result<()>;
+type EncodeFunction<W> = fn(&mut ECCEncoder<W>, &[u8]) -> Result<()>;
 
-fn encode_none<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
-    writer.inner.write_all(data)
+fn encode_none<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<()> {
+    encoder.inner.write_all(data)
 }
 
-fn encode_light<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
-    writer.encode_with_rs::<_, 239, 16>(data, code_255_239::encode)
+fn encode_light<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<()> {
+    encoder.encode_with_rs::<_, 239, 16>(data, code_255_239::encode)
 }
 
-fn encode_medium<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
-    writer.encode_with_rs::<_, 223, 32>(data, code_255_223::encode)
+fn encode_medium<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<()> {
+    encoder.encode_with_rs::<_, 223, 32>(data, code_255_223::encode)
 }
 
-fn encode_heavy<W: Write>(writer: &mut ECCWriter<W>, data: &[u8]) -> Result<()> {
-    writer.encode_with_rs::<_, 191, 64>(data, code_255_191::encode)
+fn encode_heavy<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<()> {
+    encoder.encode_with_rs::<_, 191, 64>(data, code_255_191::encode)
 }
 
 /// Error Correction Code Writer that applies Reed-Solomon encoding to compressed data.
-pub(crate) struct ECCWriter<W> {
+pub(crate) struct ECCEncoder<W> {
     inner: W,
     encode_fn: EncodeFunction<W>,
     buffer: Vec<u8>,
     uses_buffer: bool,
 }
 
-impl<W: Write> ECCWriter<W> {
+impl<W: Write> ECCEncoder<W> {
     /// Create a new ECCWriter with the specified error correction level.
     pub(crate) fn new(inner: W, error_correction: ErrorCorrection) -> Self {
         let (encode_fn, uses_buffer) = match error_correction {
@@ -99,7 +99,7 @@ impl<W: Write> ECCWriter<W> {
     }
 }
 
-impl<W: Write> Write for ECCWriter<W> {
+impl<W: Write> Write for ECCEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if !self.uses_buffer {
             return self.inner.write(buf);
@@ -127,27 +127,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ec_writer_none_passthrough() {
+    fn test_ec_encoder_none_passthrough() {
         let mut output = Vec::new();
-        let mut ec_writer = ECCWriter::new(&mut output, ErrorCorrection::None);
+        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::None);
 
         let test_data = b"Hello, World!";
-        ec_writer.write_all(test_data).unwrap();
+        ec_encoder.write_all(test_data).unwrap();
 
-        let _final_output = ec_writer.finish().unwrap();
+        let _final_output = ec_encoder.finish().unwrap();
 
         assert_eq!(output, test_data);
     }
 
     #[test]
-    fn test_ec_writer_light_encoding() {
+    fn test_ec_encoder_light_encoding() {
         let mut output = Vec::new();
-        let mut ec_writer = ECCWriter::new(&mut output, ErrorCorrection::Light);
+        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Light);
 
         let test_data = b"Hello, Reed-Solomon encoding!";
-        ec_writer.write_all(test_data).unwrap();
+        ec_encoder.write_all(test_data).unwrap();
 
-        let _final_output = ec_writer.finish().unwrap();
+        let _final_output = ec_encoder.finish().unwrap();
 
         assert_eq!(output.len(), 255);
 
@@ -161,15 +161,15 @@ mod tests {
     }
 
     #[test]
-    fn test_ec_writer_multiple_codewords() {
+    fn test_ec_encoder_multiple_codewords() {
         let mut output = Vec::new();
-        let mut ec_writer = ECCWriter::new(&mut output, ErrorCorrection::Light);
+        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Light);
 
         let mut test_data = Vec::new();
         test_data.extend_from_slice(b"A".repeat(300).as_slice());
 
-        ec_writer.write_all(&test_data).unwrap();
-        let _final_output = ec_writer.finish().unwrap();
+        ec_encoder.write_all(&test_data).unwrap();
+        let _final_output = ec_encoder.finish().unwrap();
 
         // We should have 2 codewords: 2 * 255 = 510 bytes.
         assert_eq!(output.len(), 2 * 255);

@@ -5,26 +5,26 @@ use crate::{
     reed_solomon::{code_255_191, code_255_223, code_255_239},
 };
 
-type DecodeFunction<R> = fn(&mut ECCReader<R>, &mut [u8]) -> Result<usize>;
+type DecodeFunction<R> = fn(&mut ECCDecoder<R>, &mut [u8]) -> Result<usize>;
 
-fn decode_none<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
-    reader.inner.read(buf)
+fn decode_none<R: Read>(decoder: &mut ECCDecoder<R>, buf: &mut [u8]) -> Result<usize> {
+    decoder.inner.read(buf)
 }
 
-fn decode_light<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
-    reader.decode_with_rs::<_, 239>(buf, code_255_239::decode)
+fn decode_light<R: Read>(decoder: &mut ECCDecoder<R>, buf: &mut [u8]) -> Result<usize> {
+    decoder.decode_with_rs::<_, 239>(buf, code_255_239::decode)
 }
 
-fn decode_medium<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
-    reader.decode_with_rs::<_, 223>(buf, code_255_223::decode)
+fn decode_medium<R: Read>(decoder: &mut ECCDecoder<R>, buf: &mut [u8]) -> Result<usize> {
+    decoder.decode_with_rs::<_, 223>(buf, code_255_223::decode)
 }
 
-fn decode_heavy<R: Read>(reader: &mut ECCReader<R>, buf: &mut [u8]) -> Result<usize> {
-    reader.decode_with_rs::<_, 191>(buf, code_255_191::decode)
+fn decode_heavy<R: Read>(decoder: &mut ECCDecoder<R>, buf: &mut [u8]) -> Result<usize> {
+    decoder.decode_with_rs::<_, 191>(buf, code_255_191::decode)
 }
 
-/// Error Correction Reader that applies Reed-Solomon decoding to compressed data.
-pub(crate) struct ECCReader<R> {
+/// Error Correction Decoder that applies Reed-Solomon decoding to compressed data.
+pub(crate) struct ECCDecoder<R> {
     inner: R,
     decode_fn: DecodeFunction<R>,
     buffer: Vec<u8>,
@@ -34,8 +34,8 @@ pub(crate) struct ECCReader<R> {
     uses_buffer: bool,
 }
 
-impl<R: Read> ECCReader<R> {
-    /// Create a new ECCReader with the specified error correction level.
+impl<R: Read> ECCDecoder<R> {
+    /// Create a new ECCDecoder with the specified error correction level.
     pub(crate) fn new(inner: R, error_correction: ErrorCorrection, validate_rs: bool) -> Self {
         let (decode_fn, uses_buffer) = match error_correction {
             ErrorCorrection::None => (decode_none as DecodeFunction<R>, false),
@@ -140,13 +140,13 @@ impl<R: Read> ECCReader<R> {
         Ok(total_read)
     }
 
-    /// Get the inner reader.
+    /// Get the inner decoder.
     pub(crate) fn into_inner(self) -> R {
         self.inner
     }
 }
 
-impl<R: Read> Read for ECCReader<R> {
+impl<R: Read> Read for ECCDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if !self.uses_buffer {
             return self.inner.read(buf);
@@ -161,12 +161,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ecc_reader_none_passthrough() {
+    fn test_ecc_decoder_none_passthrough() {
         let test_data = b"Hello, World!";
-        let mut ecc_reader = ECCReader::new(test_data.as_slice(), ErrorCorrection::None, false);
+        let mut ecc_decoder = ECCDecoder::new(test_data.as_slice(), ErrorCorrection::None, false);
 
         let mut output = vec![0u8; test_data.len()];
-        let bytes_read = ecc_reader.read(&mut output).unwrap();
+        let bytes_read = ecc_decoder.read(&mut output).unwrap();
 
         assert_eq!(bytes_read, test_data.len());
         assert_eq!(&output, test_data);

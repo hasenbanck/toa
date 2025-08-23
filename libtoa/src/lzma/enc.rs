@@ -1,12 +1,12 @@
 mod encoder;
 mod encoder_fast;
 mod encoder_normal;
-mod lzma2s_writer;
+mod lzma2s_encoder;
 mod range_enc;
 
 pub use encoder::EncodeMode;
 use lz::MFType;
-pub use lzma2s_writer::*;
+pub use lzma2s_encoder::*;
 
 use super::*;
 

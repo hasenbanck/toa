@@ -9,12 +9,12 @@ pub(crate) mod decoder;
 pub(crate) mod enc;
 pub mod filter;
 pub(crate) mod lz;
-mod lzma2s_reader;
+mod lzma2s_decoder;
 pub(crate) mod range_dec;
 pub(crate) mod state;
 
-pub use enc::{EncodeMode, LZMA2sWriter, LZMAOptions};
-pub use lzma2s_reader::LZMA2sReader;
+pub use enc::{EncodeMode, LZMA2sEncoder, LZMAOptions};
+pub use lzma2s_decoder::LZMA2sDecoder;
 
 use crate::{
     Read, Result, Write,
@@ -205,7 +205,7 @@ impl LengthCoder {
     }
 }
 
-trait ByteReader {
+trait ByteDecoder {
     fn read_u8(&mut self) -> Result<u8>;
 
     fn read_u32(&mut self) -> Result<u32>;
@@ -215,7 +215,7 @@ trait ByteWriter {
     fn write_u8(&mut self, value: u8) -> Result<()>;
 }
 
-impl<T: Read> ByteReader for T {
+impl<T: Read> ByteDecoder for T {
     #[inline(always)]
     fn read_u8(&mut self) -> Result<u8> {
         let mut buf = [0; 1];

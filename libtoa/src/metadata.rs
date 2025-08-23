@@ -38,19 +38,19 @@ pub struct TOAMetadata {
 }
 
 impl TOAMetadata {
-    /// Read TOA file metadata from a seekable reader.
+    /// Read TOA file metadata from a seekable decoder.
     ///
     /// This function reads and validates the header and trailer of an TOA file,
     /// returning metadata about the compression parameters and file sizes.
-    /// The reader position is preserved.
+    /// The decoder position is preserved.
     #[cfg(feature = "std")]
-    pub fn parse<R: Read + Seek>(mut reader: R) -> crate::Result<TOAMetadata> {
-        let original_pos = reader.stream_position()?;
+    pub fn parse<R: Read + Seek>(mut decoder: R) -> crate::Result<TOAMetadata> {
+        let original_pos = decoder.stream_position()?;
 
-        reader.seek(SeekFrom::Start(0))?;
+        decoder.seek(SeekFrom::Start(0))?;
 
         let mut header_buffer = [0u8; 32];
-        reader.read_exact(&mut header_buffer)?;
+        decoder.read_exact(&mut header_buffer)?;
 
         let header = TOAHeader::parse(&header_buffer, true)?;
 
@@ -61,7 +61,7 @@ impl TOAMetadata {
         // Parse blocks until we find the final trailer.
         loop {
             let mut buffer = [0u8; 64];
-            reader.read_exact(&mut buffer)?;
+            decoder.read_exact(&mut buffer)?;
 
             // Check bit 0 (MSB) to determine if this is a block header or final trailer.
             if (buffer[0] & 0x80) != 0 {
@@ -73,14 +73,14 @@ impl TOAMetadata {
                         match TOAFileTrailer::parse(&buffer, false) {
                             Ok(trailer) => (trailer, false, false),
                             Err(e) => {
-                                reader.seek(SeekFrom::Start(original_pos))?;
+                                decoder.seek(SeekFrom::Start(original_pos))?;
                                 return Err(e);
                             }
                         }
                     }
                 };
 
-                reader.seek(SeekFrom::Start(original_pos))?;
+                decoder.seek(SeekFrom::Start(original_pos))?;
 
                 return Ok(TOAMetadata {
                     prefilter: header.prefilter(),
@@ -104,7 +104,7 @@ impl TOAMetadata {
                 compressed_size += physical_size;
                 block_count += 1;
 
-                reader.seek(SeekFrom::Current(physical_size as i64))?;
+                decoder.seek(SeekFrom::Current(physical_size as i64))?;
             }
         }
     }

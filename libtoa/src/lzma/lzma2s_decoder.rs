@@ -1,11 +1,11 @@
-use super::{ByteReader, decoder::LZMADecoder, lz::LZDecoder, range_dec::RangeDecoder};
+use super::{ByteDecoder, decoder::LZMADecoder, lz::LZDecoder, range_dec::RangeDecoder};
 use crate::{Error, Read, copy_error, error_invalid_input};
 
 pub const COMPRESSED_SIZE_MAX: u32 = 1 << 16;
 const DELTA_COMPRESSED_SIZE_MAX: usize = COMPRESSED_SIZE_MAX as usize;
 
 /// A single-threaded LZMA2s decompressor.
-pub struct LZMA2sReader<R> {
+pub struct LZMA2sDecoder<R> {
     inner: R,
     lz: LZDecoder,
     rc: RangeDecoder,
@@ -23,15 +23,15 @@ fn get_dict_size(dict_size: u32) -> u32 {
     (dict_size + 15) & !15
 }
 
-impl<R> LZMA2sReader<R> {
-    /// Unwraps the reader, returning the underlying reader.
+impl<R> LZMA2sDecoder<R> {
+    /// Unwraps the decoder, returning the underlying decoder.
     pub fn into_inner(self) -> R {
         self.inner
     }
 }
 
-impl<R: Read> LZMA2sReader<R> {
-    /// Create a new LZMA2s reader.
+impl<R: Read> LZMA2sDecoder<R> {
+    /// Create a new LZMA2s decoder.
     pub fn new(inner: R, lc: u32, lp: u32, pb: u32, dict_size: u32) -> Self {
         let lz = LZDecoder::new(get_dict_size(dict_size) as _, None);
         let rc = RangeDecoder::new_buffer(COMPRESSED_SIZE_MAX as _);
@@ -224,7 +224,7 @@ impl<R: Read> LZMA2sReader<R> {
     }
 }
 
-impl<R: Read> Read for LZMA2sReader<R> {
+impl<R: Read> Read for LZMA2sDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
         match self.read_decode(buf) {
             Ok(size) => Ok(size),

@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use libtoa::{TOAOptions, TOAStreamingWriter};
+use libtoa::{TOAOptions, TOAStreamingEncoder};
 
 use crate::Cli;
 
@@ -39,10 +39,10 @@ pub(crate) fn compress_file(
 ) -> std::io::Result<(u64, u64, std::time::Duration)> {
     let input_file = File::open(&cli.input)?;
     let file_size = input_file.metadata()?.len();
-    let mut input_reader = BufReader::with_capacity(65536, input_file);
+    let mut input_decoder = BufReader::with_capacity(65536, input_file);
 
     let output_file = File::create(output_path)?;
-    let output_writer = BufWriter::with_capacity(65536, output_file);
+    let output_encoder = BufWriter::with_capacity(65536, output_file);
 
     let mut options = TOAOptions::from_preset(cli.preset);
 
@@ -79,7 +79,7 @@ pub(crate) fn compress_file(
 
     options = options.with_error_correction(cli.ecc);
 
-    let mut toa_writer = TOAStreamingWriter::new(output_writer, options);
+    let mut toa_encoder = TOAStreamingEncoder::new(output_encoder, options);
 
     let start_time = Instant::now();
 
@@ -87,15 +87,15 @@ pub(crate) fn compress_file(
     let mut bytes_read = 0u64;
 
     loop {
-        match input_reader.read(&mut buffer)? {
+        match input_decoder.read(&mut buffer)? {
             0 => break,
             n => {
-                toa_writer.write_all(&buffer[..n])?;
+                toa_encoder.write_all(&buffer[..n])?;
                 bytes_read += n as u64;
             }
         }
     }
-    toa_writer.finish()?;
+    toa_encoder.finish()?;
 
     let elapsed = start_time.elapsed();
 

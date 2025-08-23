@@ -1,4 +1,4 @@
-use super::{BIT_MODEL_TOTAL_BITS, ByteReader, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS};
+use super::{BIT_MODEL_TOTAL_BITS, ByteDecoder, MOVE_BITS, RC_BIT_MODEL_OFFSET, SHIFT_BITS};
 use crate::{Read, error_invalid_input};
 
 pub(crate) struct RangeDecoder {
@@ -32,7 +32,7 @@ impl RangeDecoderBuffer {
 
     fn read_u8(&mut self) -> u8 {
         // Out of bound reads return an 1, which is fine, since the
-        // LZMA reader will then throw a "dist overflow" error.
+        // LZMA decoder will then throw a "dist overflow" error.
         // Not returning an error results in code that can be better
         // optimized in the hot path and overall 10% better decoding
         // performance.
@@ -327,23 +327,23 @@ impl RangeDecoder {
         }
     }
 
-    pub(crate) fn prepare<R: Read>(&mut self, mut reader: R, len: usize) -> crate::Result<()> {
+    pub(crate) fn prepare<R: Read>(&mut self, mut decoder: R, len: usize) -> crate::Result<()> {
         if len < 5 {
             return Err(error_invalid_input("buffer len must >= 5"));
         }
 
-        let b = reader.read_u8()?;
+        let b = decoder.read_u8()?;
         if b != 0x00 {
             return Err(error_invalid_input("first byte is 0"));
         }
-        self.code = reader.read_u32()?;
+        self.code = decoder.read_u32()?;
 
         self.range = 0xFFFFFFFFu32;
         let len = len - 5;
         let pos = self.inner.buf.len() - len;
         let end = pos + len;
         self.inner.pos = pos;
-        reader.read_exact(&mut self.inner.buf[pos..end])
+        decoder.read_exact(&mut self.inner.buf[pos..end])
     }
 
     #[inline]

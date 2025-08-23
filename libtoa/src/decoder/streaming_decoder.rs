@@ -1,6 +1,6 @@
 use blake3::hazmat::HasherExt;
 
-use super::Reader;
+use super::Decoder;
 use crate::{
     Read, Result, TOAHeader, cv_stack::CVStack, error_invalid_data, header::TOABlockHeader,
     trailer::TOAFileTrailer,
@@ -11,12 +11,12 @@ use crate::{
 /// Validating the data and metadata by setting the `validate_rs` parameter of the factory function
 /// to `true` will activate RS verification and error correction, which slows down the decoding
 /// speed. To not pay this price, the user should either not validate and instead re-do the
-/// decoding in a blake3 hash error case, or use the other reader, which either have to buffer
+/// decoding in a blake3 hash error case, or use the other decoder, which either have to buffer
 /// the data because of multi threading, or can re-read the block by seeking.
-pub struct TOAStreamingReader<R> {
+pub struct TOAStreamingDecoder<R> {
     inner: Option<R>,
     header: Option<TOAHeader>,
-    current_reader: Option<Reader<R>>,
+    current_decoder: Option<Decoder<R>>,
     blocks_finished: bool,
     trailer_read: bool,
     current_block_hasher: blake3::Hasher,
@@ -29,13 +29,13 @@ pub struct TOAStreamingReader<R> {
     partial_block_msb_set: bool,
 }
 
-impl<R: Read> TOAStreamingReader<R> {
-    /// Create a new TOA reader.
+impl<R: Read> TOAStreamingDecoder<R> {
+    /// Create a new TOA decoder.
     pub fn new(inner: R, validate_rs: bool) -> Self {
         Self {
             inner: Some(inner),
             header: None,
-            current_reader: None,
+            current_decoder: None,
             blocks_finished: false,
             trailer_read: false,
             current_block_hasher: blake3::Hasher::new(),
@@ -57,7 +57,7 @@ impl<R: Read> TOAStreamingReader<R> {
         let mut inner = self
             .inner
             .take()
-            .ok_or_else(|| error_invalid_data("reader consumed"))?;
+            .ok_or_else(|| error_invalid_data("decoder consumed"))?;
 
         // Read 64 bytes as potential block header or final trailer.
         let mut header_data = [0u8; 64];
@@ -119,8 +119,8 @@ impl<R: Read> TOAStreamingReader<R> {
                 // Store the block header hash for later verification.
                 self.current_block_expected_hash = Some(block_header.blake3_hash());
 
-                // Create the reader chain.
-                let reader = Reader::new(
+                // Create the decoder chain.
+                let decoder = Decoder::new(
                     inner,
                     header.prefilter(),
                     header.error_correction(),
@@ -131,17 +131,17 @@ impl<R: Read> TOAStreamingReader<R> {
                     header.dict_size(),
                 )?;
 
-                self.current_reader = Some(reader);
+                self.current_decoder = Some(decoder);
 
                 Ok(true)
             }
         }
     }
 
-    /// Finish the current block and recover the inner reader.
+    /// Finish the current block and recover the inner decoder.
     fn finish_current_block(&mut self) -> Result<()> {
-        if let Some(reader) = self.current_reader.take() {
-            let recovered_inner = reader.into_inner();
+        if let Some(decoder) = self.current_decoder.take() {
+            let recovered_inner = decoder.into_inner();
 
             let expected_hash = self
                 .current_block_expected_hash
@@ -173,16 +173,16 @@ impl<R: Read> TOAStreamingReader<R> {
         Ok(())
     }
 
-    /// Consume the reader and return the inner reader.
+    /// Consume the decoder and return the inner decoder.
     pub fn into_inner(mut self) -> R {
-        if self.current_reader.is_some() {
+        if self.current_decoder.is_some() {
             let _ = self.finish_current_block();
         }
-        self.inner.take().expect("reader was consumed")
+        self.inner.take().expect("decoder was consumed")
     }
 }
 
-impl<R: Read> Read for TOAStreamingReader<R> {
+impl<R: Read> Read for TOAStreamingDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -198,7 +198,7 @@ impl<R: Read> Read for TOAStreamingReader<R> {
             let inner = self
                 .inner
                 .as_mut()
-                .ok_or_else(|| error_invalid_data("reader consumed"))?;
+                .ok_or_else(|| error_invalid_data("decoder consumed"))?;
 
             let mut buffer = [0u8; 32];
 
@@ -216,16 +216,16 @@ impl<R: Read> Read for TOAStreamingReader<R> {
 
         while !remaining.is_empty() {
             // If no current block, try to start the next one.
-            if self.current_reader.is_none() && !self.start_next_block()? {
+            if self.current_decoder.is_none() && !self.start_next_block()? {
                 self.trailer_read = true;
                 break;
             }
 
-            if let Some(ref mut reader) = self.current_reader {
-                let bytes_read = reader.read(remaining)?;
+            if let Some(ref mut decoder) = self.current_decoder {
+                let bytes_read = decoder.read(remaining)?;
 
                 if bytes_read == 0 {
-                    // Current block exhausted - recover the inner reader.
+                    // Current block exhausted - recover the inner decoder.
                     self.finish_current_block()?;
                     continue;
                 }
@@ -250,19 +250,19 @@ mod tests {
     use std::io::{Cursor, Write};
 
     use super::*;
-    use crate::writer::{TOAOptions, TOAStreamingWriter};
+    use crate::encoder::{TOAOptions, TOAStreamingEncoder};
 
     #[test]
     fn test_round_trip_empty() {
         let mut compressed = Vec::new();
         let options = TOAOptions::default();
 
-        let writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
-        writer.finish().unwrap();
+        let encoder = TOAStreamingEncoder::new(Cursor::new(&mut compressed), options);
+        encoder.finish().unwrap();
 
-        let mut reader = TOAStreamingReader::new(compressed.as_slice(), true);
+        let mut decoder = TOAStreamingDecoder::new(compressed.as_slice(), true);
         let mut decompressed = Vec::new();
-        reader.read_to_end(&mut decompressed).unwrap();
+        decoder.read_to_end(&mut decompressed).unwrap();
 
         assert_eq!(decompressed, Vec::<u8>::new());
     }
@@ -273,13 +273,13 @@ mod tests {
         let mut compressed = Vec::new();
         let options = TOAOptions::default();
 
-        let mut writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
-        writer.write_all(original_data).unwrap();
-        writer.finish().unwrap();
+        let mut encoder = TOAStreamingEncoder::new(Cursor::new(&mut compressed), options);
+        encoder.write_all(original_data).unwrap();
+        encoder.finish().unwrap();
 
-        let mut reader = TOAStreamingReader::new(compressed.as_slice(), true);
+        let mut decoder = TOAStreamingDecoder::new(compressed.as_slice(), true);
         let mut decompressed = Vec::new();
-        reader.read_to_end(&mut decompressed).unwrap();
+        decoder.read_to_end(&mut decompressed).unwrap();
 
         assert_eq!(decompressed, original_data);
     }
@@ -297,13 +297,13 @@ mod tests {
         let mut compressed = Vec::new();
         let options = TOAOptions::default().with_error_correction(ecc_level);
 
-        let mut writer = TOAStreamingWriter::new(Cursor::new(&mut compressed), options);
-        writer.write_all(&original_data).unwrap();
-        writer.finish().unwrap();
+        let mut encoder = TOAStreamingEncoder::new(Cursor::new(&mut compressed), options);
+        encoder.write_all(&original_data).unwrap();
+        encoder.finish().unwrap();
 
-        let mut reader = TOAStreamingReader::new(compressed.as_slice(), true);
+        let mut decoder = TOAStreamingDecoder::new(compressed.as_slice(), true);
         let mut decompressed = Vec::new();
-        reader.read_to_end(&mut decompressed).unwrap();
+        decoder.read_to_end(&mut decompressed).unwrap();
 
         assert_eq!(decompressed, original_data);
     }

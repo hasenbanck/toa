@@ -82,12 +82,12 @@ impl Read for &[u8] {
 ///
 /// Will get removed once there is a standard way in either `core` or `alloc`.
 pub trait Write {
-    /// Write a buffer into this writer.
+    /// Write a buffer into this encoder.
     fn write(&mut self, buf: &[u8]) -> crate::Result<usize>;
     /// Flush this output stream.
     fn flush(&mut self) -> crate::Result<()>;
 
-    /// Attempts to write an entire buffer into this writer.
+    /// Attempts to write an entire buffer into this encoder.
     fn write_all(&mut self, mut buf: &[u8]) -> crate::Result<()> {
         while !buf.is_empty() {
             match self.write(buf) {

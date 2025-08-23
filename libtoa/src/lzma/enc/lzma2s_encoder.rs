@@ -13,7 +13,7 @@ const DELTA_COMPRESSED_SIZE_MIN: u32 = DELTA_COMPRESSED_SIZE_MAX - 255;
 const DELTA_UNCOMPRESSED_CENTER: u32 = 65536;
 
 /// A single-threaded LZMA2s compressor.
-pub struct LZMA2sWriter<W: Write> {
+pub struct LZMA2sEncoder<W: Write> {
     inner: W,
     rc: RangeEncoder<RangeEncoderBuffer>,
     lzma: LZMAEncoder,
@@ -23,8 +23,8 @@ pub struct LZMA2sWriter<W: Write> {
     limit: u64,
 }
 
-impl<W: Write> LZMA2sWriter<W> {
-    /// Creates a new LZMA2s writer that will write compressed data to the given writer.
+impl<W: Write> LZMA2sEncoder<W> {
+    /// Creates a new LZMA2s encoder that will write compressed data to the given encoder.
     pub fn new(inner: W, limit: u64, options: &LZMAOptions) -> Self {
         let rc = RangeEncoder::new_buffer(COMPRESSED_SIZE_MAX as usize);
         let (lzma, mode) = LZMAEncoder::new(
@@ -154,7 +154,7 @@ impl<W: Write> LZMA2sWriter<W> {
         Ok(())
     }
 
-    /// Finishes the compression and returns the underlying writer.
+    /// Finishes the compression and returns the underlying encoder.
     pub fn finish(mut self) -> crate::Result<W> {
         self.lzma.lz.set_finishing();
 
@@ -170,7 +170,7 @@ impl<W: Write> LZMA2sWriter<W> {
     }
 }
 
-impl<W: Write> Write for LZMA2sWriter<W> {
+impl<W: Write> Write for LZMA2sEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> crate::Result<usize> {
         let mut len = buf.len();
 

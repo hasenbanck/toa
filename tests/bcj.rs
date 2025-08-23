@@ -3,7 +3,7 @@ use std::{
     io::{Cursor, Read, Write},
 };
 
-use libtoa::{Prefilter, TOAOptions, TOAStreamingReader, TOAStreamingWriter};
+use libtoa::{Prefilter, TOAOptions, TOAStreamingDecoder, TOAStreamingEncoder};
 
 struct LZMAParameter {
     lc: u8,
@@ -36,11 +36,11 @@ fn test_bcj_filter_roundtrip(
     let mut compressed_data_bcj = Vec::new();
     {
         let cursor = Cursor::new(&mut compressed_data_bcj);
-        let mut writer = TOAStreamingWriter::new(cursor, options_bcj);
-        writer
+        let mut encoder = TOAStreamingEncoder::new(cursor, options_bcj);
+        encoder
             .write_all(test_data)
             .unwrap_or_else(|_| panic!("Failed to write data for {test_name}"));
-        writer
+        encoder
             .finish()
             .unwrap_or_else(|_| panic!("Failed to finish compression for {test_name}"));
     }
@@ -49,11 +49,11 @@ fn test_bcj_filter_roundtrip(
     let mut compressed_data_no_bcj = Vec::new();
     {
         let cursor = Cursor::new(&mut compressed_data_no_bcj);
-        let mut writer = TOAStreamingWriter::new(cursor, options_no_bcj);
-        writer
+        let mut encoder = TOAStreamingEncoder::new(cursor, options_no_bcj);
+        encoder
             .write_all(test_data)
             .unwrap_or_else(|_| panic!("Failed to write data for {test_name} (no BCJ)"));
-        writer
+        encoder
             .finish()
             .unwrap_or_else(|_| panic!("Failed to finish compression for {test_name} (no BCJ)"));
     }
@@ -78,11 +78,11 @@ fn test_bcj_filter_roundtrip(
     let mut decompressed_data = Vec::new();
     {
         let cursor = Cursor::new(compressed_data_bcj);
-        let mut toa_reader = TOAStreamingReader::new(cursor, true);
+        let mut toa_decoder = TOAStreamingDecoder::new(cursor, true);
 
         let mut buffer = vec![0u8; 8192];
         loop {
-            match toa_reader.read(&mut buffer) {
+            match toa_decoder.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => decompressed_data.extend_from_slice(&buffer[..n]),
                 Err(error) => panic!("Failed to read decompressed data for {test_name}: {error}"),

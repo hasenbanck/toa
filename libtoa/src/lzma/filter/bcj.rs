@@ -30,8 +30,8 @@ impl BCJFilter {
 
 const FILTER_BUF_SIZE: usize = 4096;
 
-/// Reader that applies BCJ (Branch/Call/Jump) filtering to compressed data.
-pub struct BCJReader<R> {
+/// Decoder that applies BCJ (Branch/Call/Jump) filtering to compressed data.
+pub struct BCJDecoder<R> {
     inner: R,
     filter: BCJFilter,
     state: State,
@@ -47,7 +47,7 @@ struct State {
     end_reached: bool,
 }
 
-impl<R> BCJReader<R> {
+impl<R> BCJDecoder<R> {
     fn new(inner: R, filter: BCJFilter) -> Self {
         Self {
             inner,
@@ -60,61 +60,61 @@ impl<R> BCJReader<R> {
         }
     }
 
-    /// Unwraps the reader, returning the underlying reader.
+    /// Unwraps the decoder, returning the underlying decoder.
     pub fn into_inner(self) -> R {
         self.inner
     }
 
-    /// Creates a new BCJ reader for x86 instruction filtering.
+    /// Creates a new BCJ decoder for x86 instruction filtering.
     #[inline]
     pub fn new_x86(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_x86(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for ARM instruction filtering.
+    /// Creates a new BCJ decoder for ARM instruction filtering.
     #[inline]
     pub fn new_arm(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_arm(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for ARM64 instruction filtering.
+    /// Creates a new BCJ decoder for ARM64 instruction filtering.
     #[inline]
     pub fn new_arm64(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_arm64(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for ARM Thumb instruction filtering.
+    /// Creates a new BCJ decoder for ARM Thumb instruction filtering.
     #[inline]
     pub fn new_arm_thumb(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_arm_thumb(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for PowerPC instruction filtering.
+    /// Creates a new BCJ decoder for PowerPC instruction filtering.
     #[inline]
     pub fn new_ppc(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_power_pc(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for SPARC instruction filtering.
+    /// Creates a new BCJ decoder for SPARC instruction filtering.
     #[inline]
     pub fn new_sparc(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_sparc(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for IA-64 instruction filtering.
+    /// Creates a new BCJ decoder for IA-64 instruction filtering.
     #[inline]
     pub fn new_ia64(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_ia64(start_pos, false))
     }
 
-    /// Creates a new BCJ reader for RISC-V instruction filtering.
+    /// Creates a new BCJ decoder for RISC-V instruction filtering.
     #[inline]
     pub fn new_riscv(inner: R, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_riscv(start_pos, false))
     }
 }
 
-impl<R: Read> Read for BCJReader<R> {
+impl<R: Read> Read for BCJDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -189,14 +189,14 @@ impl<R: Read> Read for BCJReader<R> {
     }
 }
 
-/// Writer that applies BCJ (Branch/Call/Jump) filtering to data before compression.
-pub struct BCJWriter<W> {
+/// Encoder that applies BCJ (Branch/Call/Jump) filtering to data before compression.
+pub struct BCJEncoder<W> {
     inner: W,
     filter: BCJFilter,
     buffer: Vec<u8>,
 }
 
-impl<W> BCJWriter<W> {
+impl<W> BCJEncoder<W> {
     fn new(inner: W, filter: BCJFilter) -> Self {
         Self {
             inner,
@@ -205,61 +205,61 @@ impl<W> BCJWriter<W> {
         }
     }
 
-    /// Unwraps the writer, returning the underlying writer.
+    /// Unwraps the encoder, returning the underlying encoder.
     pub fn into_inner(self) -> W {
         self.inner
     }
 
-    /// Creates a new BCJ writer for x86 instruction filtering.
+    /// Creates a new BCJ encoder for x86 instruction filtering.
     #[inline]
     pub fn new_x86(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_x86(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for ARM instruction filtering.
+    /// Creates a new BCJ encoder for ARM instruction filtering.
     #[inline]
     pub fn new_arm(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_arm(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for ARM64 instruction filtering.
+    /// Creates a new BCJ encoder for ARM64 instruction filtering.
     #[inline]
     pub fn new_arm64(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_arm64(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for ARM Thumb instruction filtering.
+    /// Creates a new BCJ encoder for ARM Thumb instruction filtering.
     #[inline]
     pub fn new_arm_thumb(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_arm_thumb(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for PowerPC instruction filtering.
+    /// Creates a new BCJ encoder for PowerPC instruction filtering.
     #[inline]
     pub fn new_ppc(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_power_pc(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for SPARC instruction filtering.
+    /// Creates a new BCJ encoder for SPARC instruction filtering.
     #[inline]
     pub fn new_sparc(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_sparc(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for IA-64 instruction filtering.
+    /// Creates a new BCJ encoder for IA-64 instruction filtering.
     #[inline]
     pub fn new_ia64(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_ia64(start_pos, true))
     }
 
-    /// Creates a new BCJ writer for RISC-V instruction filtering.
+    /// Creates a new BCJ encoder for RISC-V instruction filtering.
     #[inline]
     pub fn new_riscv(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_riscv(start_pos, true))
     }
 }
 
-impl<W: Write> Write for BCJWriter<W> {
+impl<W: Write> Write for BCJEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> crate::Result<usize> {
         let data_size = buf.len();
 
@@ -300,14 +300,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-x86");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_x86(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_x86(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_x86(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_x86(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -317,14 +317,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-arm");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_arm(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_arm(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_arm(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_arm(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -334,14 +334,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-arm64");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_arm64(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_arm64(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_arm64(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_arm64(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -351,14 +351,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-arm-thumb");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_arm_thumb(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_arm_thumb(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_arm_thumb(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_arm_thumb(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -368,14 +368,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-ppc");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_ppc(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_ppc(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_ppc(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_ppc(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -385,14 +385,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-sparc");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_sparc(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_sparc(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_sparc(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_sparc(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -402,14 +402,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-ia64");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_ia64(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_ia64(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_ia64(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_ia64(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }
@@ -419,14 +419,14 @@ mod tests {
         let test_data = include_bytes!("../../../../tests/data/wget-riscv");
 
         let mut encoded_buffer = Vec::new();
-        let mut writer = BCJWriter::new_riscv(Cursor::new(&mut encoded_buffer), 0);
-        copy(&mut test_data.as_slice(), &mut writer).expect("Failed to encode data");
+        let mut encoder = BCJEncoder::new_riscv(Cursor::new(&mut encoded_buffer), 0);
+        copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
 
         assert!(test_data.as_slice() != encoded_buffer.as_slice());
 
         let mut decoded_data = Vec::new();
-        let mut reader = BCJReader::new_riscv(Cursor::new(&encoded_buffer), 0);
-        copy(&mut reader, &mut decoded_data).expect("Failed to decode data");
+        let mut decoder = BCJDecoder::new_riscv(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
         assert!(test_data.as_slice() == decoded_data.as_slice());
     }

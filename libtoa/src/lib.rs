@@ -26,11 +26,11 @@
 extern crate alloc;
 
 mod cv_stack;
+mod decoder;
 mod lzma;
-mod reader;
 pub mod reed_solomon;
 
-mod writer;
+mod encoder;
 
 mod header;
 mod metadata;
@@ -48,6 +48,8 @@ pub(crate) use std::io::Read;
 pub(crate) use std::io::Write;
 
 pub use cv_stack::CVStack;
+pub use decoder::TOAStreamingDecoder;
+pub use encoder::{TOABlockWriter, TOAOptions, TOAStreamingEncoder};
 pub use header::{TOABlockHeader, TOAHeader};
 pub use metadata::TOAMetadata;
 #[cfg(not(feature = "std"))]
@@ -56,9 +58,7 @@ pub use no_std::Error;
 pub use no_std::Read;
 #[cfg(not(feature = "std"))]
 pub use no_std::Write;
-pub use reader::TOAStreamingReader;
 pub use trailer::TOAFileTrailer;
-pub use writer::{TOABlockWriter, TOAOptions, TOAStreamingWriter};
 
 /// Result type of the crate.
 #[cfg(feature = "std")]

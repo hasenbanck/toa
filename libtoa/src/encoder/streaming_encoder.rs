@@ -4,9 +4,9 @@ use crate::{
 };
 
 /// A single-threaded streaming TOA compressor.
-pub struct TOAStreamingWriter<W> {
+pub struct TOAStreamingEncoder<W> {
     inner: W,
-    block_writer: Option<TOABlockWriter>,
+    block_encoder: Option<TOABlockWriter>,
     options: TOAOptions,
     header_written: bool,
     cv_stack: CVStack,
@@ -15,14 +15,14 @@ pub struct TOAStreamingWriter<W> {
     block_size: u64,
 }
 
-impl<W: Write> TOAStreamingWriter<W> {
-    /// Create a new TOA writer with the given options.
+impl<W: Write> TOAStreamingEncoder<W> {
+    /// Create a new TOA encoder with the given options.
     pub fn new(inner: W, options: TOAOptions) -> Self {
         let block_size = options.block_size().unwrap_or(u64::MAX / 2);
 
         Self {
             inner,
-            block_writer: None,
+            block_encoder: None,
             options,
             header_written: false,
             cv_stack: CVStack::new(),
@@ -43,22 +43,22 @@ impl<W: Write> TOAStreamingWriter<W> {
         Ok(())
     }
 
-    fn ensure_block_writer_exists(&mut self) {
-        if self.block_writer.is_none() {
-            let block_writer =
+    fn ensure_block_encoder_exists(&mut self) {
+        if self.block_encoder.is_none() {
+            let block_encoder =
                 TOABlockWriter::new(self.options, self.block_size, self.uncompressed_size);
-            self.block_writer = Some(block_writer);
+            self.block_encoder = Some(block_encoder);
         }
     }
 
     fn finish_current_block(&mut self, is_final_block: bool) -> Result<()> {
-        if let Some(ref mut block_writer) = self.block_writer {
+        if let Some(ref mut block_encoder) = self.block_encoder {
             let next_block_offset = match is_final_block {
                 true => 0,
                 false => self.uncompressed_size,
             };
 
-            let chaining_value = block_writer.finish_and_reset(
+            let chaining_value = block_encoder.finish_and_reset(
                 &mut self.inner,
                 is_final_block,
                 next_block_offset,
@@ -79,7 +79,7 @@ impl<W: Write> TOAStreamingWriter<W> {
         trailer.write(&mut self.inner)
     }
 
-    /// Consume the writer and return the inner writer.
+    /// Consume the encoder and return the inner encoder.
     pub fn into_inner(self) -> W {
         self.inner
     }
@@ -90,7 +90,7 @@ impl<W: Write> TOAStreamingWriter<W> {
             self.write_header()?;
         }
 
-        if self.block_writer.is_some() {
+        if self.block_encoder.is_some() {
             self.finish_current_block(true)?;
         }
 
@@ -100,7 +100,7 @@ impl<W: Write> TOAStreamingWriter<W> {
     }
 }
 
-impl<W: Write> Write for TOAStreamingWriter<W> {
+impl<W: Write> Write for TOAStreamingEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -110,22 +110,22 @@ impl<W: Write> Write for TOAStreamingWriter<W> {
             self.write_header()?;
         }
 
-        self.ensure_block_writer_exists();
+        self.ensure_block_encoder_exists();
 
         let mut total_written = 0;
         let mut remaining = buf;
 
         while !remaining.is_empty() {
             // Check if we need to finish the current block based on uncompressed size limits.
-            if let Some(ref block_writer) = self.block_writer
-                && block_writer.is_full()
+            if let Some(ref block_encoder) = self.block_encoder
+                && block_encoder.is_full()
             {
                 self.finish_current_block(false)?;
-                // Block writer is automatically reset by finish_and_reset
+                // Block encoder is automatically reset by finish_and_reset
             }
 
-            let block_writer = self.block_writer.as_mut().expect("block writer not set");
-            let bytes_written = block_writer.write(remaining)?;
+            let block_encoder = self.block_encoder.as_mut().expect("block encoder not set");
+            let bytes_written = block_encoder.write(remaining)?;
 
             self.uncompressed_size += bytes_written as u64;
             total_written += bytes_written;
@@ -136,8 +136,8 @@ impl<W: Write> Write for TOAStreamingWriter<W> {
     }
 
     fn flush(&mut self) -> Result<()> {
-        if let Some(ref mut block_writer) = self.block_writer {
-            block_writer.flush()?;
+        if let Some(ref mut block_encoder) = self.block_encoder {
+            block_encoder.flush()?;
         }
 
         self.inner.flush()
@@ -156,7 +156,7 @@ mod tests {
 
     // Specification: Appendix A.1 Minimal File
     #[test]
-    fn test_toa_writer_empty() {
+    fn test_toa_encoder_empty() {
         let expected_compressed: [u8; 96] = hex!(
             "fedcba980100003e5d10a41b4946bc0d
              b0d277d8f82b4b630fbc97d7615530a9
@@ -184,8 +184,8 @@ mod tests {
             ..Default::default()
         };
 
-        let writer = TOAStreamingWriter::new(Cursor::new(&mut buffer), options);
-        let _ = writer.finish().unwrap();
+        let encoder = TOAStreamingEncoder::new(Cursor::new(&mut buffer), options);
+        let _ = encoder.finish().unwrap();
 
         assert_eq!(buffer.len(), 96, "Total file size should be 96 bytes");
 
@@ -241,7 +241,7 @@ mod tests {
 
     // Specification: Appendix A.1 Minimal File
     #[test]
-    fn test_toa_writer_zero_byte() {
+    fn test_toa_encoder_zero_byte() {
         let expected_compressed: [u8; 165] = hex!(
             "fedcba980100011f5d1e884b0ed50069
              d44c9ae6faa030510e67da670b3259a2
@@ -274,9 +274,9 @@ mod tests {
             ..Default::default()
         };
 
-        let mut writer = TOAStreamingWriter::new(Cursor::new(&mut buffer), options);
-        writer.write_all(&[0x00]).unwrap();
-        let _ = writer.finish().unwrap();
+        let mut encoder = TOAStreamingEncoder::new(Cursor::new(&mut buffer), options);
+        encoder.write_all(&[0x00]).unwrap();
+        let _ = encoder.finish().unwrap();
 
         assert_eq!(buffer.len(), 165, "Total file size should be 165 bytes");
 
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(buffer.as_slice(), expected_compressed);
     }
 
-    fn test_toa_writer_with_error_correction(
+    fn test_toa_encoder_with_error_correction(
         ecc_level: ErrorCorrection,
         expected_capability_bits: u8,
         decode_fn: fn(&mut [u8; 255]) -> Result<bool>,
@@ -365,12 +365,12 @@ mod tests {
             .with_error_correction(ecc_level)
             .with_block_size_exponent(Some(16));
 
-        let mut writer = TOAStreamingWriter::new(&mut output, options);
+        let mut encoder = TOAStreamingEncoder::new(&mut output, options);
 
         let test_data = b"Hello, TOA with Reed-Solomon error correction!";
-        writer.write_all(test_data).unwrap();
+        encoder.write_all(test_data).unwrap();
 
-        writer.finish().unwrap();
+        encoder.finish().unwrap();
 
         // 1. TOA header (32 bytes)
         // 2. Block header (64 bytes)
@@ -394,8 +394,8 @@ mod tests {
     }
 
     #[test]
-    fn test_toa_writer_with_light_error_correction() {
-        test_toa_writer_with_error_correction(
+    fn test_toa_encoder_with_light_error_correction() {
+        test_toa_encoder_with_error_correction(
             ErrorCorrection::Light,
             0b01,
             reed_solomon::code_255_239::decode,
@@ -403,8 +403,8 @@ mod tests {
     }
 
     #[test]
-    fn test_toa_writer_with_medium_error_correction() {
-        test_toa_writer_with_error_correction(
+    fn test_toa_encoder_with_medium_error_correction() {
+        test_toa_encoder_with_error_correction(
             ErrorCorrection::Medium,
             0b10,
             reed_solomon::code_255_223::decode,
@@ -412,8 +412,8 @@ mod tests {
     }
 
     #[test]
-    fn test_toa_writer_with_heavy_error_correction() {
-        test_toa_writer_with_error_correction(
+    fn test_toa_encoder_with_heavy_error_correction() {
+        test_toa_encoder_with_error_correction(
             ErrorCorrection::Heavy,
             0b11,
             reed_solomon::code_255_191::decode,
