@@ -2,7 +2,8 @@
 
 **TOA** is a next-generation compression format that combines **exceptional compression ratios** with **built-in error
 correction**, **streaming operation**, and **parallel processing**. TOA provides unique resilience against data
-corruption while maintaining competitive compression performance.
+corruption while maintaining competitive compression performance. Especially useful to guard important archival data
+against bit rot.
 
 ## Key Features
 

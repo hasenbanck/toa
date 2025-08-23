@@ -1,0 +1,209 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install cargo-pgo and b3sum
+        run: |
+          cargo install cargo-pgo
+          cargo install b3sum
+
+      - name: Build with PGO
+        run: ./build-release.sh
+
+      - name: Compress binary
+        run: |
+          gzip --keep toa
+          mv toa.gz toa-linux-x86_64.gz
+          b3sum toa-linux-x86_64.gz > toa-linux-x86_64.gz.b3
+          ./toa --preset 6 --ecc light --keep toa
+          mv toa.toa toa-linux-x86_64.toa
+          b3sum toa-linux-x86_64.toa > toa-linux-x86_64.toa.b3
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toa-linux-x86_64
+          path: |
+            toa-linux-x86_64.gz
+            toa-linux-x86_64.gz.b3
+            toa-linux-x86_64.toa
+            toa-linux-x86_64.toa.b3
+
+  build-windows:
+    name: Build Windows x86_64
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install cargo-pgo and b3sum
+        run: |
+          cargo install cargo-pgo
+          cargo install b3sum
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build with PGO
+        run: ./build-release.sh
+        shell: bash
+
+      - name: Compress binary
+        run: |
+          Compress-Archive -Path toa.exe -DestinationPath toa-windows-x86_64.zip
+          b3sum toa-windows-x86_64.zip | Out-File -FilePath toa-windows-x86_64.zip.b3 -Encoding ASCII
+          ./toa.exe --preset 6 --ecc light --keep toa.exe
+          Rename-Item -Path toa.exe.toa -NewName toa-windows-x86_64.toa
+          b3sum toa-windows-x86_64.toa | Out-File -FilePath toa-windows-x86_64.toa.b3 -Encoding ASCII
+        shell: powershell
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toa-windows-x86_64
+          path: |
+            toa-windows-x86_64.zip
+            toa-windows-x86_64.zip.b3
+            toa-windows-x86_64.toa
+            toa-windows-x86_64.toa.b3
+
+  build-macos:
+    name: Build macOS aarch64
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+
+      - name: Install cargo-pgo and b3sum
+        run: |
+          cargo install cargo-pgo
+          cargo install b3sum
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build with PGO
+        run: ./build-release.sh
+
+      - name: Compress binary
+        run: |
+          gzip --keep toa
+          mv toa.gz toa-macos-aarch64.gz
+          b3sum toa-macos-aarch64.gz > toa-macos-aarch64.gz.b3
+          ./toa --preset 6 --ecc light --keep toa
+          mv toa.toa toa-macos-aarch64.toa
+          b3sum toa-macos-aarch64.toa > toa-macos-aarch64.toa.b3
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toa-macos-aarch64
+          path: |
+            toa-macos-aarch64.gz
+            toa-macos-aarch64.gz.b3
+            toa-macos-aarch64.toa
+            toa-macos-aarch64.toa.b3
+
+  create-release:
+    name: Create GitHub Release
+    needs: [ build-linux, build-windows, build-macos ]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          if [ -f "CHANGELOG.md" ]; then
+            # Extract changelog section for this version
+            awk '/^## \[${{ steps.version.outputs.VERSION }}\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+            if [ ! -s release_notes.md ]; then
+              echo "Release ${{ steps.version.outputs.VERSION }}" > release_notes.md
+            fi
+          else
+            echo "Release ${{ steps.version.outputs.VERSION }}" > release_notes.md
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: ${{ steps.version.outputs.VERSION }}
+          body_path: release_notes.md
+          files: |
+            toa-linux-x86_64/toa-linux-x86_64.gz
+            toa-linux-x86_64/toa-linux-x86_64.gz.b3
+            toa-linux-x86_64/toa-linux-x86_64.toa
+            toa-linux-x86_64/toa-linux-x86_64.toa.b3
+            toa-windows-x86_64/toa-windows-x86_64.zip
+            toa-windows-x86_64/toa-windows-x86_64.zip.b3
+            toa-windows-x86_64/toa-windows-x86_64.toa
+            toa-windows-x86_64/toa-windows-x86_64.toa.b3
+            toa-macos-aarch64/toa-macos-aarch64.gz
+            toa-macos-aarch64/toa-macos-aarch64.gz.b3
+            toa-macos-aarch64/toa-macos-aarch64.toa
+            toa-macos-aarch64/toa-macos-aarch64.toa.b3
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
