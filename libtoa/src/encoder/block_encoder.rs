@@ -119,6 +119,7 @@ pub struct TOABlockWriter {
     current_block_hasher: blake3::Hasher,
     block_size: u64,
     block_offset: u64,
+    leave_space_for_header: bool,
 }
 
 impl TOABlockWriter {
@@ -129,19 +130,43 @@ impl TOABlockWriter {
     /// - `block_size`: Maximum uncompressed size for this block.
     /// - `block_offset`: The offset of this block in the overall stream (for BLAKE3 chaining).
     pub fn new(options: TOAOptions, block_size: u64, block_offset: u64) -> Self {
+        Self::with_header_space(options, block_size, block_offset, false)
+    }
+
+    /// Create a new block encoder, optionally pre-allocating space for a block header.
+    ///
+    /// # Parameters
+    /// - `options`: Compression options for this block.
+    /// - `block_size`: Maximum uncompressed size for this block.
+    /// - `block_offset`: The offset of this block in the overall stream (for BLAKE3 chaining).
+    /// - `leave_space_for_header`: If true, pre-allocate 64 bytes at the beginning for header.
+    pub fn with_header_space(
+        options: TOAOptions,
+        block_size: u64,
+        block_offset: u64,
+        leave_space_for_header: bool,
+    ) -> Self {
         debug_assert_eq!(block_offset % 1024, 0);
         debug_assert_eq!(block_offset % block_size, 0);
 
         let mut hasher = blake3::Hasher::new();
         hasher.set_input_offset(block_offset);
 
+        // Pre-allocate header space if requested (TOABlockHeader is always 64 bytes).
+        let initial_buffer = if leave_space_for_header {
+            vec![0u8; 64]
+        } else {
+            Vec::new()
+        };
+
         Self {
-            encoder: Some(Encoder::new(&options, block_size, Vec::new())),
+            encoder: Some(Encoder::new(&options, block_size, initial_buffer)),
             options,
             uncompressed_size: 0,
             current_block_hasher: hasher,
             block_size,
             block_offset,
+            leave_space_for_header,
         }
     }
 
@@ -161,18 +186,63 @@ impl TOABlockWriter {
     }
 
     /// Reset the block encoder for a new block at the given offset.
-    fn reset(&mut self, new_block_offset: u64) {
+    fn reset(&mut self, new_block_offset: u64, _leave_space_for_header: bool) {
         debug_assert_eq!(self.block_offset % 1024, 0);
         debug_assert!(self.block_offset < new_block_offset);
         debug_assert_eq!(new_block_offset % self.block_size, 0);
 
-        self.encoder = Some(Encoder::new(&self.options, self.block_size, Vec::new()));
+        let initial_buffer = if self.leave_space_for_header {
+            vec![0u8; 64]
+        } else {
+            Vec::new()
+        };
+
+        self.encoder = Some(Encoder::new(&self.options, self.block_size, initial_buffer));
         self.uncompressed_size = 0;
         self.block_offset = new_block_offset;
 
         let mut hasher = blake3::Hasher::new();
         hasher.set_input_offset(new_block_offset);
         self.current_block_hasher = hasher;
+    }
+
+    /// Finish the current block.
+    ///
+    /// # Parameters
+    /// - `is_final_block`: Whether this is the final block in the stream
+    ///
+    /// # Returns
+    /// The BLAKE3 chaining value for this block.
+    pub fn finish(&mut self, is_final_block: bool) -> Result<(TOABlockHeader, Vec<u8>)> {
+        let compressed_data = if let Some(encoder) = self.encoder.take() {
+            encoder.finish()?
+        } else {
+            Vec::new()
+        };
+
+        let actual_compressed_size = if self.leave_space_for_header && compressed_data.len() >= 64 {
+            compressed_data.len() - 64
+        } else {
+            compressed_data.len()
+        };
+
+        if actual_compressed_size > (i64::MAX as usize) {
+            return Err(error_invalid_data("compressed block too large"));
+        }
+
+        let is_partial_block = self.uncompressed_size < self.block_size;
+
+        // For single-block files, we finalize as root. For multi-block files, as chaining value.
+        let hash_value = if is_final_block && self.block_offset == 0 {
+            *self.current_block_hasher.finalize().as_bytes()
+        } else {
+            self.current_block_hasher.finalize_non_root()
+        };
+
+        let header =
+            TOABlockHeader::new(actual_compressed_size as u64, is_partial_block, hash_value);
+
+        Ok((header, compressed_data))
     }
 
     /// Finish the current block and write it to the given encoder.
@@ -192,31 +262,7 @@ impl TOABlockWriter {
         is_final_block: bool,
         next_block_offset: u64,
     ) -> Result<[u8; 32]> {
-        let compressed_data = if let Some(encoder) = self.encoder.take() {
-            encoder.finish()?
-        } else {
-            Vec::new()
-        };
-
-        if !compressed_data.is_empty() {
-            let compressed_size = compressed_data.len();
-
-            if compressed_size > (i64::MAX as usize) {
-                return Err(error_invalid_data("compressed block too large"));
-            }
-        }
-
-        let is_partial_block = self.uncompressed_size < self.block_size;
-
-        // For single-block files, we finalize as root. For multi-block files, as chaining value.
-        let hash_value = if is_final_block && self.block_offset == 0 {
-            *self.current_block_hasher.finalize().as_bytes()
-        } else {
-            self.current_block_hasher.finalize_non_root()
-        };
-
-        let header =
-            TOABlockHeader::new(compressed_data.len() as u64, is_partial_block, hash_value);
+        let (header, compressed_data) = self.finish(is_final_block)?;
 
         let chaining_value = header.blake3_hash();
 
@@ -225,8 +271,7 @@ impl TOABlockWriter {
 
         // Reset for next block if this isn't the final block.
         if !is_final_block {
-            self.encoder = Some(Encoder::new(&self.options, self.block_size, Vec::new()));
-            self.reset(next_block_offset);
+            self.reset(next_block_offset, self.leave_space_for_header);
         }
 
         Ok(chaining_value)
@@ -277,7 +322,7 @@ mod tests {
     fn test_block_encoder_full() {
         let options = TOAOptions {
             prefilter: Prefilter::None,
-            dictionary_size_log2: 16,
+            dictionary_size_exponent: 16,
             lc: 3,
             lp: 0,
             pb: 2,
@@ -301,7 +346,7 @@ mod tests {
     fn test_block_encoder_reset_and_reuse() {
         let options = TOAOptions {
             prefilter: Prefilter::None,
-            dictionary_size_log2: 16,
+            dictionary_size_exponent: 16,
             lc: 3,
             lp: 0,
             pb: 2,

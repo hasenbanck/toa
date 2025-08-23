@@ -11,7 +11,6 @@ pub struct TOAStreamingEncoder<W> {
     header_written: bool,
     cv_stack: CVStack,
     uncompressed_size: u64,
-
     block_size: u64,
 }
 
@@ -176,7 +175,7 @@ mod tests {
 
         let options = TOAOptions {
             prefilter: Prefilter::None,
-            dictionary_size_log2: 16,
+            dictionary_size_exponent: 16,
             lc: 3,
             lp: 0,
             pb: 2,
@@ -266,7 +265,7 @@ mod tests {
 
         let options = TOAOptions {
             prefilter: Prefilter::BcjX86,
-            dictionary_size_log2: 30,
+            dictionary_size_exponent: 30,
             lc: 3,
             lp: 0,
             pb: 2,

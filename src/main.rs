@@ -23,6 +23,7 @@ struct Cli {
     preset: u32,
     block_size: Option<u8>,
     block_count: Option<u64>,
+    threads: usize,
     x86: bool,
     arm: bool,
     armthumb: bool,
@@ -101,6 +102,15 @@ impl Cli {
                     .value_name("count")
                     .value_parser(value_parser!(u64).range(1..=18446744073709551615))
                     .conflicts_with("block-size"),
+            )
+            .arg(
+                Arg::new("threads")
+                    .help("Number of threads to use for multithreaded compression / decompression (0 = automatic, defaults to number of CPU cores)")
+                    .short('t')
+                    .long("threads")
+                    .value_name("N")
+                    .value_parser(value_parser!(usize))
+                    .default_value("0"),
             )
             .arg(
                 Arg::new("x86")
@@ -303,6 +313,14 @@ impl Cli {
             *matches.get_one::<u32>("preset").unwrap()
         };
 
+        // Handle thread count - 0 means automatic
+        let threads = match *matches.get_one::<usize>("threads").unwrap() {
+            0 => std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1),
+            n => n,
+        };
+
         Self {
             input: matches.get_one::<String>("input").unwrap().clone(),
             output: matches.get_one::<String>("output").cloned(),
@@ -313,6 +331,7 @@ impl Cli {
             preset,
             block_size: matches.get_one::<u8>("block-size").copied(),
             block_count: matches.get_one::<u64>("block-count").copied(),
+            threads,
             x86: matches.get_flag("x86"),
             arm: matches.get_flag("arm"),
             armthumb: matches.get_flag("armthumb"),
@@ -425,7 +444,7 @@ fn main() -> Result<()> {
             println!("Compressed:   {}", format_size(compressed_size));
             println!("Uncompressed: {}", format_size(uncompressed_size));
             println!(
-                "Compression ratio: {:.2}% bytes",
+                "Compression ratio: {:.2}%",
                 if uncompressed_size > 0 {
                     (compressed_size as f64 / uncompressed_size as f64) * 100.0
                 } else {
@@ -467,7 +486,7 @@ fn main() -> Result<()> {
             println!("Compressed:   {}", format_size(compressed_size));
             println!("Uncompressed: {}", format_size(uncompressed_size));
             println!(
-                "Compression ratio: {:.2}% bytes",
+                "Compression ratio: {:.2}%",
                 if uncompressed_size > 0 {
                     (compressed_size as f64 / uncompressed_size as f64) * 100.0
                 } else {

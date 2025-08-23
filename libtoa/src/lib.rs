@@ -49,6 +49,8 @@ pub(crate) use std::io::Write;
 
 pub use cv_stack::CVStack;
 pub use decoder::TOAStreamingDecoder;
+#[cfg(feature = "std")]
+pub use encoder::TOAFileEncoder;
 pub use encoder::{TOABlockWriter, TOAOptions, TOAStreamingEncoder};
 pub use header::{TOABlockHeader, TOAHeader};
 pub use metadata::TOAMetadata;
@@ -232,4 +234,56 @@ fn error_unsupported(msg: &'static str) -> Error {
 #[inline(always)]
 fn copy_error(error: &Error) -> Error {
     *error
+}
+
+#[cfg(feature = "std")]
+/// Optimized copy function with 64KiB buffer for better performance.
+pub fn copy_wide<R: Read, W: Write>(reader: &mut R, writer: &mut W) -> Result<u64> {
+    const BUFFER_SIZE: usize = 64 * 1024; // 64 KiB buffer
+    let mut buf = [0u8; BUFFER_SIZE];
+    let mut written = 0u64;
+
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                writer.write_all(&buf[..n])?;
+                written += n as u64;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(written)
+}
+
+#[cfg(feature = "std")]
+/// A reader that limits reading to a specific number of bytes and uses BufReader internally.
+pub(crate) struct LimitedReader<R> {
+    inner: std::io::BufReader<R>,
+    remaining: u64,
+}
+
+#[cfg(feature = "std")]
+impl<R: Read> LimitedReader<R> {
+    /// Create a new LimitedReader that will read at most `limit` bytes from the inner reader.
+    pub(crate) fn new(reader: R, limit: u64) -> Self {
+        Self {
+            inner: std::io::BufReader::with_capacity(64 << 10, reader),
+            remaining: limit,
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<R: Read> Read for LimitedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        if self.remaining == 0 {
+            return Ok(0);
+        }
+        let max_read = (buf.len() as u64).min(self.remaining) as usize;
+        let bytes_read = self.inner.read(&mut buf[..max_read])?;
+        self.remaining -= bytes_read as u64;
+        Ok(bytes_read)
+    }
 }

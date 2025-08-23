@@ -1,8 +1,11 @@
 mod block_encoder;
 mod ecc_encoder;
+mod file_encoder;
 mod streaming_encoder;
 
 pub use block_encoder::TOABlockWriter;
+#[cfg(feature = "std")]
+pub use file_encoder::TOAFileEncoder;
 pub use streaming_encoder::TOAStreamingEncoder;
 
 use crate::{
@@ -18,7 +21,7 @@ pub struct TOAOptions {
     /// Reed-Solomon error correction level for data protection.
     pub(crate) error_correction: ErrorCorrection,
     /// Dictionary size to use for the LZMA compression algorithm as a power of two.
-    pub(crate) dictionary_size_log2: u8,
+    pub(crate) dictionary_size_exponent: u8,
     /// LZMA literal context bits (0-8).
     pub(crate) lc: u8,
     /// LZMA literal position bits (0-4).
@@ -43,7 +46,7 @@ impl Default for TOAOptions {
         Self {
             prefilter: Prefilter::None,
             error_correction: ErrorCorrection::None,
-            dictionary_size_log2: 26,
+            dictionary_size_exponent: 26,
             lc: 3,
             lp: 0,
             pb: 2,
@@ -123,7 +126,7 @@ impl TOAOptions {
         Self {
             prefilter,
             error_correction,
-            dictionary_size_log2,
+            dictionary_size_exponent: dictionary_size_log2,
             lc,
             lp,
             pb,
@@ -171,18 +174,17 @@ impl TOAOptions {
         self
     }
 
-    /// Set the dictionary size of the LZMA compression algorithm.
+    /// Set the dictionary size exponent of the LZMA compression algorithm.
     ///
-    /// Clamped in range of 16 (64 KiB) and 31 (2 GiB).
-    pub fn with_dictionary_size(mut self, dictionary_size_log2: u8) -> Self {
-        self.dictionary_size_log2 = dictionary_size_log2.clamp(16, 31);
+    /// Dictionary size = 2^exponent bytes. Valid range: 16-31 (64 KiB to 4 EiB).
+    pub fn with_dictionary_exponent(mut self, dictionary_size_log2: u8) -> Self {
+        self.dictionary_size_exponent = dictionary_size_log2.clamp(16, 31);
         self
     }
 
     /// Set the block size exponent for multi-block compression.
     ///
     /// Block size = 2^exponent bytes. Valid range: 16-62 (64 KiB to 4 EiB).
-    /// If None, all data will be written in one block.
     pub fn with_block_size_exponent(mut self, block_size_exponent: Option<u8>) -> Self {
         self.block_size_exponent = block_size_exponent.map(|exp| exp.clamp(16, 62));
         self
@@ -190,13 +192,18 @@ impl TOAOptions {
 
     /// Get dictionary size in bytes.
     pub fn dict_size(&self) -> u32 {
-        2u32.pow(self.dictionary_size_log2 as u32)
+        2u32.pow(self.dictionary_size_exponent as u32)
             .min(lzma::DICT_SIZE_MAX)
     }
 
     /// Get dictionary size as power of 2 exponent.
-    pub fn dict_size_log2(&self) -> u8 {
-        self.dictionary_size_log2
+    pub fn dict_size_exponent(&self) -> u8 {
+        self.dictionary_size_exponent
+    }
+
+    /// Get block size as power of 2 exponent.
+    pub fn block_size_exponent(&self) -> Option<u8> {
+        self.block_size_exponent
     }
 
     /// Get block size in bytes. Returns None if single-block mode.

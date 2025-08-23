@@ -69,11 +69,6 @@ impl<T> WorkStealingQueue<T> {
     pub(crate) fn len(&self) -> usize {
         self.inner.queue.lock().unwrap().len()
     }
-
-    /// Returns true if the queue is empty.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.inner.queue.lock().unwrap().is_empty()
-    }
 }
 
 impl<T> Default for WorkStealingQueue<T> {
@@ -112,22 +107,6 @@ impl<T> WorkerHandle<T> {
             queue = self.inner.condvar.wait(queue).unwrap();
         }
     }
-
-    /// Attempts to steal work without blocking.
-    /// Returns `None` if no work is currently available.
-    pub(crate) fn try_steal(&self) -> Option<T> {
-        self.inner.queue.lock().unwrap().pop_front()
-    }
-
-    /// Returns `true` if the queue is closed and empty (no more work will ever be available).
-    pub(crate) fn is_closed_and_empty(&self) -> bool {
-        let queue = self.inner.queue.lock().unwrap();
-        let closed = self
-            .inner
-            .closed
-            .load(core::sync::atomic::Ordering::Acquire);
-        closed && queue.is_empty()
-    }
 }
 
 impl<T> Clone for WorkerHandle<T> {
@@ -143,48 +122,6 @@ mod tests {
     use std::{thread, time::Duration};
 
     use super::*;
-
-    #[test]
-    fn test_basic_functionality() {
-        let queue = WorkStealingQueue::new();
-        let worker = queue.worker();
-
-        assert!(queue.push(1));
-        assert!(queue.push(2));
-        assert!(queue.push(3));
-
-        assert_eq!(worker.steal(), Some(1));
-        assert_eq!(worker.steal(), Some(2));
-
-        assert_eq!(worker.try_steal(), Some(3));
-        assert_eq!(worker.try_steal(), None);
-
-        queue.close();
-        assert!(!queue.push(4));
-        assert!(worker.is_closed_and_empty());
-    }
-
-    #[test]
-    fn test_multiple_workers() {
-        let queue = WorkStealingQueue::new();
-        let worker1 = queue.worker();
-        let worker2 = queue.worker();
-
-        for i in 0..10 {
-            queue.push(i);
-        }
-
-        let mut results = Vec::new();
-        while let Some(item) = worker1.try_steal() {
-            results.push(item);
-        }
-        while let Some(item) = worker2.try_steal() {
-            results.push(item);
-        }
-
-        results.sort();
-        assert_eq!(results, (0..10).collect::<Vec<_>>());
-    }
 
     #[test]
     fn test_blocking_behavior() {

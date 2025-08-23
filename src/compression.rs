@@ -1,11 +1,6 @@
-use std::{
-    fs,
-    fs::File,
-    io::{BufReader, BufWriter, Read, Write},
-    time::Instant,
-};
+use std::{fs, fs::File, time::Instant};
 
-use libtoa::{TOAOptions, TOAStreamingEncoder};
+use libtoa::{TOAFileEncoder, TOAOptions, copy_wide};
 
 use crate::Cli;
 
@@ -37,12 +32,8 @@ pub(crate) fn compress_file(
     cli: &Cli,
     output_path: &str,
 ) -> std::io::Result<(u64, u64, std::time::Duration)> {
-    let input_file = File::open(&cli.input)?;
-    let file_size = input_file.metadata()?.len();
-    let mut input_decoder = BufReader::with_capacity(65536, input_file);
-
-    let output_file = File::create(output_path)?;
-    let output_encoder = BufWriter::with_capacity(65536, output_file);
+    let file_size = fs::metadata(&cli.input)?.len();
+    let mut output_file = File::create(output_path)?;
 
     let mut options = TOAOptions::from_preset(cli.preset);
 
@@ -59,7 +50,7 @@ pub(crate) fn compress_file(
         options = options.with_pb(pb);
     }
     if let Some(dict_size) = cli.dict_size {
-        options = options.with_dictionary_size(dict_size);
+        options = options.with_dictionary_exponent(dict_size);
     }
     if let Some(block_size) = cli.block_size {
         if block_size == 0 {
@@ -73,33 +64,19 @@ pub(crate) fn compress_file(
         options = options.with_block_size_exponent(calculated_exponent);
     } else {
         // Default behavior: set block size to match dictionary size of the selected preset.
-        let dict_size_log2 = options.dict_size_log2();
+        let dict_size_log2 = options.dict_size_exponent();
         options = options.with_block_size_exponent(Some(dict_size_log2));
     }
 
     options = options.with_error_correction(cli.ecc);
 
-    let mut toa_encoder = TOAStreamingEncoder::new(output_encoder, options);
+    let mut toa_encoder = TOAFileEncoder::new(&cli.input, options, cli.threads)?;
 
     let start_time = Instant::now();
 
-    let mut buffer = vec![0u8; 65536];
-    let mut bytes_read = 0u64;
-
-    loop {
-        match input_decoder.read(&mut buffer)? {
-            0 => break,
-            n => {
-                toa_encoder.write_all(&buffer[..n])?;
-                bytes_read += n as u64;
-            }
-        }
-    }
-    toa_encoder.finish()?;
+    let compressed_size = copy_wide(&mut toa_encoder, &mut output_file)?;
 
     let elapsed = start_time.elapsed();
 
-    let compressed_size = fs::metadata(output_path)?.len();
-
-    Ok((bytes_read, compressed_size, elapsed))
+    Ok((file_size, compressed_size, elapsed))
 }

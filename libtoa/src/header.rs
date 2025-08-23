@@ -26,7 +26,7 @@ impl TOAHeader {
             lc: options.lc,
             lp: options.lp,
             pb: options.pb,
-            dict_size_log2: options.dictionary_size_log2,
+            dict_size_log2: options.dictionary_size_exponent,
         }
     }
 
