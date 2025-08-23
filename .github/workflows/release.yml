@@ -12,6 +12,8 @@ jobs:
   build-linux:
     name: Build Linux x86_64
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout code
@@ -54,6 +56,8 @@ jobs:
   build-windows:
     name: Build Windows x86_64
     runs-on: windows-latest
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout code
@@ -96,6 +100,8 @@ jobs:
   build-macos:
     name: Build macOS aarch64
     runs-on: macos-latest
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout code
@@ -146,6 +152,8 @@ jobs:
     name: Create GitHub Release
     needs: [ build-linux, build-windows, build-macos ]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout code

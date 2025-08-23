@@ -12,6 +12,8 @@ env:
 jobs:
   build:
     runs-on: ${{matrix.os}}
+    permissions:
+      contents: read
     strategy:
       matrix:
         os:
@@ -45,6 +47,8 @@ jobs:
 
   build-wasm:
     runs-on: ${{matrix.os}}
+    permissions:
+      contents: read
     strategy:
       matrix:
         os:
@@ -69,6 +73,8 @@ jobs:
   rustfmt:
     name: Rustfmt
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -85,6 +91,8 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
