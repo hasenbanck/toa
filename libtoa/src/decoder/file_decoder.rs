@@ -37,6 +37,7 @@ enum DecoderState {
 struct CompletedBlock {
     index: usize,
     data: Vec<u8>,
+    chaining_value: [u8; 32],
 }
 
 impl PartialEq for CompletedBlock {
@@ -78,6 +79,7 @@ pub struct TOAFileDecoder {
     current_block: Option<Vec<u8>>,
     current_block_position: usize,
     validate_rs: bool,
+    file_path: PathBuf,
 }
 
 impl TOAFileDecoder {
@@ -119,6 +121,7 @@ impl TOAFileDecoder {
             current_block: None,
             current_block_position: 0,
             validate_rs,
+            file_path: toa_file_path.to_path_buf(),
         };
 
         decoder.start_workers(toa_file_path, effective_threads, result_sender);
@@ -214,9 +217,10 @@ impl TOAFileDecoder {
             };
 
             let result = Self::decode_block(&toa_file_path, &header, validate_rs, &block_work).map(
-                |(decompressed_data, _hash_verified)| CompletedBlock {
+                |(decompressed_data, chaining_value)| CompletedBlock {
                     index: block_work.index,
                     data: decompressed_data,
+                    chaining_value,
                 },
             );
 
@@ -232,7 +236,7 @@ impl TOAFileDecoder {
         header: &TOAHeader,
         validate_rs: bool,
         block_work: &BlockWork,
-    ) -> Result<(Vec<u8>, bool)> {
+    ) -> Result<(Vec<u8>, [u8; 32])> {
         use crate::LimitedReader;
 
         let mut file = File::open(toa_file_path)?;
@@ -264,19 +268,24 @@ impl TOAFileDecoder {
         hasher.set_input_offset(block_work.index as u64 * header.block_size());
         hasher.update(&decompressed_data);
 
-        let hash_verified = if block_work.is_last && block_work.index == 0 {
-            // Single block file - use root hash
-            *hasher.finalize().as_bytes() == expected_hash
-        } else {
-            // Multi-block file - use chaining value
-            hasher.finalize_non_root() == expected_hash
+        let (hash_verified, chaining_value) = match block_work.is_last && block_work.index == 0 {
+            true => {
+                // Single block file - use root hash.
+                let root_hash = *hasher.finalize().as_bytes();
+                (root_hash == expected_hash, root_hash)
+            }
+            false => {
+                // Multi-block file - use chaining value.
+                let chaining_value = hasher.finalize_non_root();
+                (chaining_value == expected_hash, chaining_value)
+            }
         };
 
         if !hash_verified {
             return Err(error_invalid_data("BLAKE3 hash mismatch"));
         }
 
-        Ok((decompressed_data, hash_verified))
+        Ok((decompressed_data, chaining_value))
     }
 
     fn process_completed_blocks(&mut self) -> Result<()> {
@@ -303,20 +312,8 @@ impl TOAFileDecoder {
 
             let is_last = completed_block.index == self.total_blocks - 1;
 
-            if self.total_blocks == 1 {
-                // Single block - the hash was already verified in the worker
-                // We don't need to add it to cv_stack
-            } else {
-                // Multi-block file - add chaining value
-                // We need to recompute the hash here since we don't have it from the worker
-                let mut hasher = blake3::Hasher::new();
-                hasher.set_input_offset(completed_block.index as u64 * self.header.block_size());
-                hasher.update(&completed_block.data);
-                let chaining_value = hasher.finalize_non_root();
-
-                self.cv_stack
-                    .add_chunk_chaining_value(chaining_value, is_last);
-            }
+            self.cv_stack
+                .add_chunk_chaining_value(completed_block.chaining_value, is_last);
 
             self.next_block_index += 1;
 
@@ -361,10 +358,19 @@ impl TOAFileDecoder {
 
         self.join_workers();
 
-        // For multi-block files, verify the root hash:
-        if self.total_blocks > 1 {
-            // TODO: We need to get the trailer and verify the root hash
-            //       For now, we assume the hash verification passed
+        let mut file = File::open(&self.file_path)?;
+        file.seek(SeekFrom::End(-64))?;
+
+        let mut trailer_buffer = [0u8; 64];
+        file.read_exact(&mut trailer_buffer)?;
+
+        let trailer = crate::trailer::TOAFileTrailer::parse(&trailer_buffer, self.validate_rs)?;
+        let computed_root_hash = self.cv_stack.finalize();
+
+        if computed_root_hash != trailer.blake3_hash() {
+            return Err(error_invalid_data(
+                "file integrity check failed: BLAKE3 root hash mismatch",
+            ));
         }
 
         self.state = DecoderState::Finished;
