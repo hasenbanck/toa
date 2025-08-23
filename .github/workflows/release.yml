@@ -65,29 +65,13 @@ jobs:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
 
-      - name: Install cargo-pgo and b3sum
+      - name: Install b3sum
         run: |
           cargo install cargo-pgo
           cargo install b3sum
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      # PGO inside the GitHub Runner currently segfaults, even with 100% safe Rust. Reason unknown. Can't replicate locally.
-      #      - name: Build with PGO
-      #        run: ./build-release.sh
-      #        shell: bash
-
       - name: Build with PGO
-        run: cargo build --release && mv ./target/release/toa ./toa
+        run: ./build-release.sh
         shell: bash
 
       - name: Compress binary
@@ -128,19 +112,17 @@ jobs:
           cargo install cargo-pgo
           cargo install b3sum
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      # PGO inside the GitHub Runner currently segfaults, even with 100% safe Rust.
+      # Reason unknown. Can't replicate locally.
+      #      - name: Build with PGO
+      #        run: ./build-release.sh
+      #        shell: bash
 
-      - name: Build with PGO
-        run: ./build-release.sh
+      - name: Build without PGO
+        run: |
+          cargo build --release
+          mv ./target/release/toa ./toa
+        shell: bash
 
       - name: Compress binary
         run: |
