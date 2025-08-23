@@ -9,7 +9,7 @@ hex-literal = "1"
 
 [package]
 name = "toa"
-description = "TOA compression command-line tool"
+description = "TOA compression command-line tool. Modern compression with built-in error correction"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
 homepage = "https://github.com/hasenbanck/toa/"
 repository = "https://github.com/hasenbanck/toa/"

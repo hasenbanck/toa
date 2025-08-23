@@ -1,6 +1,6 @@
 [package]
 name = "libtoa"
-description = "TOA compression file format library"
+description = "TOA compression file format library. Modern compression with built-in error correction"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
 homepage = "https://github.com/hasenbanck/toa/"
 repository = "https://github.com/hasenbanck/toa/"
