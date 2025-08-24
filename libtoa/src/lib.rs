@@ -5,6 +5,10 @@
 //! uses LZMA as the primary compression algorithm with BLAKE3 cryptographic hashing and
 //! Reed-Solomon error correction codes.
 //!
+//! ## ⚠ Specification Status ⚠
+//!
+//! **TOA is still experimental, do NOT use it in production yet**
+//!
 //! **Note: The TOA format is currently in draft mode (v0.8) and not yet frozen. The specification
 //! may change in future versions.**
 //!

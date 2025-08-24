@@ -15,7 +15,9 @@ against bit rot. It uses LZMA2s, a special variant of LZMA as it's compression a
 - **Streaming & Parallel**: Process data as it arrives with multi-core support
 - **Executable Optimization**: Optional BCJ filters for better executable compression
 
-## Specification Status
+## ⚠ Specification Status ⚠
+
+**TOA is still experimental, do NOT use it in production yet**
 
 **Note**: TOA format is currently at specification version 0.8 and not yet frozen. While the core features are stable,
 the format may evolve before reaching version 1.0. The specification is thoroughly documented
