@@ -3,8 +3,8 @@
 //! ## Specification
 //!
 //! - Field: GF(2^8) = GF(256)
-//! - Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-//! - Generator: α = 2
+//! - Primitive polynomial: x^8 + x^4 + x^3 + x + 1
+//! - Generator: α = 3
 //! - Codes:
 //!     - (n=255, k=239, t=8)
 //!     - (n=255, k=223, t=16)
@@ -21,7 +21,7 @@ mod primitives {
     use crate::error_invalid_data;
 
     // GF(256) parameters
-    const PRIMITIVE_POLY: u16 = 0x11D; // (x^8 + x^4 + x^3 + x^2 + 1)
+    const PRIMITIVE_POLY: u16 = 0x11B; // (x^8 + x^4 + x^3 + x + 1)
     const GF_EXP_LEN: usize = 512;
     const GF_LOG_LEN: usize = 256;
 
@@ -36,15 +36,17 @@ mod primitives {
         let mut exp = [0u8; GF_EXP_LEN];
         let mut log = [0u8; GF_LOG_LEN];
 
-        // α = 2, build α^0..α^254
+        // α = 3, build α^0..α^254
         let mut i = 0usize;
         let mut x: u16 = 1;
         while i < 255 {
             exp[i] = (x & 0xFF) as u8;
             log[(x & 0xFF) as usize] = i as u8;
-            x <<= 1;
-            if (x & 0x100) != 0 {
-                x ^= PRIMITIVE_POLY;
+            let x_times_2 = x << 1;
+            if (x_times_2 & 0x100) != 0 {
+                x = (x_times_2 ^ PRIMITIVE_POLY) ^ x;
+            } else {
+                x = x_times_2 ^ x;
             }
             i += 1;
         }
@@ -711,7 +713,7 @@ pub(crate) mod code_255_239 {
                  c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb
                  dcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedee"
             );
-            let expected_parity = hex!("b173d9afcc56f1636e325dc22984f527");
+            let expected_parity = hex!("07ffcc5e9bfb1c0838aee03603b502aa");
             test_vector(data, expected_parity);
         }
     }
@@ -843,8 +845,8 @@ pub(crate) mod code_255_223 {
                  dcddde"
             );
             let expected_parity = hex!(
-                "9c04c041d1ce5905b434daf6e5465f92d14ef9c2
-                 e2016cc2bbf0773a018bc2aa"
+                "93cca4cfe7c914d65c083eb57a634cd5a86f77ed
+                 f97b87cf4c05be2478e175d4"
             );
             test_vector(data, expected_parity);
         }
@@ -976,10 +978,10 @@ pub(crate) mod code_255_191 {
                  b4b5b6b7b8b9babbbcbdbe"
             );
             let expected_parity = hex!(
-                "e8036c9c7298995a41a264a425fd1c9fe71e45f8
-                 4f2dbbec9240caa1bbc44ae55529991460cb8bc3
-                 2fbbb9e129bc6017f896f6a0a60677c657e04a54
-                 dfb7c62a"
+                "792316db851127a71e19d44e5fe58400bffdc5be
+                 5a73b3b90f1b660ea25f08bfced98819758eabc2
+                 586966bee7b5abec7387eea89e0377f623340cf0
+                 6209b500"
             );
             test_vector(data, expected_parity);
         }
@@ -1203,8 +1205,8 @@ pub(crate) mod code_64_40 {
                  ffffffffffffffffffffffffffffffffffffffff"
             );
             let expected_parity = hex!(
-                "e81d42b0548bfb1c5e9d0475a75446c6bda44e0b
-                 8ea6e459"
+                "579a5af18d3b67e5bfec98bb598dc2b4a5a7714d
+                 dc267cd9"
             );
             test_vector(data, expected_parity);
         }
@@ -1216,8 +1218,8 @@ pub(crate) mod code_64_40 {
                  1415161718191a1b1c1d1e1f2021222324252627"
             );
             let expected_parity = hex!(
-                "9fb10923191a0659292e6e7c5ee8fbf0111329eb
-                 8bdaefe8"
+                "bb68ae9f872c2d5eb1c486a104d5d0d0e77140d3
+                 1e2ae52b"
             );
             test_vector(data, expected_parity);
             test_vector(data, expected_parity);
@@ -1299,14 +1301,14 @@ pub(crate) mod code_32_10 {
         #[test]
         fn test_rs_32_10_specification_test_vector_2() {
             let data = hex!("ffffffffffffffffffff");
-            let expected_parity = hex!("ad52e479625d811b5e60e40fafd4eb5b68eeb3847978");
+            let expected_parity = hex!("6b947c9013410983bf927cd5eafba958214e0fee90ef");
             test_vector(data, expected_parity);
         }
 
         #[test]
         fn test_rs_32_10_specification_test_vector_3() {
             let data = hex!("00010203040506070809");
-            let expected_parity = hex!("fe98b737bc91e51a91a17ced02342c9688e2688eb3fd");
+            let expected_parity = hex!("2e15b80a2d182f2a0e46a888cf8803394a8b5cdba41d");
             test_vector(data, expected_parity);
         }
     }

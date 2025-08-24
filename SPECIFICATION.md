@@ -1,6 +1,6 @@
 # TOA File Format Specification
 
-Version 0.8
+Version 0.9
 
 ## 1. Introduction
 
@@ -251,8 +251,8 @@ The header MUST be protected by 24 bytes of Reed-Solomon parity using RS(32,10) 
 Parameters that MUST be used:
 
 - Field: GF(2^8)
-- Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-- Generator: α = 2
+- Primitive polynomial: x^8 + x^4 + x^3 + x + 1
+- Generator: α = 3
 - Code: RS(32,10)
 
 ## 4. Blocks Section
@@ -390,8 +390,8 @@ The protection level determines the codeword structure:
 All protection levels MUST use the same field parameters as metadata protection:
 
 - Field: GF(2^8)
-- Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
-- Generator: α = 2
+- Primitive polynomial: x^8 + x^4 + x^3 + x + 1
+- Generator: α = 3
 
 The LZMA end-of-stream marker MUST be preserved to ensure proper termination even with padding.
 
@@ -431,9 +431,9 @@ hash.
 Parameters that MUST be used:
 
 - Field: GF(2^8)
-- Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1
+- Primitive polynomial: x^8 + x^4 + x^3 + x + 1
 - Code: RS(64,40)
-- Generator: α = 2
+- Generator: α = 3
 
 The 8-byte size and 32-byte hash MUST be treated as 40 consecutive bytes for Reed-Solomon encoding. Implementations MUST
 NOT reorder bytes or perform integer interpretation.
@@ -738,12 +738,12 @@ Hexdump of an empty file with the following configuration:
 - Block size exponent: 62
 
 ```
-fedcba980100003e5d10a41b4946bc0d
-b0d277d8f82b4b630fbc97d7615530a9
+fedcba980100003e5d10140ed92e0b7e
+18866b3b1ad3127d3d32d6ce6dd6de3e
 8000000000000000af1349b9f5f9a1a6
 a0404dea36dcc9499bcb25c9adc112b7
-cc9a93cae41f3262a2b54a54b5f88a30
-271d41dceb661a679fbd77edc3f9040a
+cc9a93cae41f32625cf0fa99d34e6851
+905c5dde0df7976421e6ba1fef77f31c
 ```
 
 Hexdump of a single block file with a single compressed zero byte with the following configuration:
@@ -756,17 +756,17 @@ Hexdump of a single block file with a single compressed zero byte with the follo
 - Block size exponent: 11
 
 ```
-fedcba980100011f5d1e884b0ed50069
-d44c9ae6faa030510e67da670b3259a2
+fedcba980100011f5d1e4821f8b455f1
+dd66671d1cd18158eef29407d7902722
 40000000000000052d3adedff11b61f1
 4c886e35afa036736dcd87a74d27b5c1
-510225d0f592e21319fd6b0ccec085a0
-1fe8fcbdaeca06f1572e90fee6bee37e
+510225d0f592e21319916b9a59885a7d
+2ae4244c100b255e2451ff5682d77c10
 200000000080000000000000012d3ade
 dff11b61f14c886e35afa036736dcd87
-a74d27b5c1510225d0f592e2137e40e1
-6f84c3e6a17e3c65da1f2c61ddd66d5f
-4a662c32b9
+a74d27b5c1510225d0f592e2138f3db9
+e4bb5add135383b284084730db5626e6
+2299458c1e
 ```
 
 ### A.2 Block Chaining Example
@@ -809,8 +809,7 @@ Data:    0000000000000000000000000000000000000000
          0000000000000000000000000000000000000000
          00000000000000000000000000000000000000
 
-Parity:  0000000000000000000000000000000000000000
-         00000000
+Parity:  00000000000000000000000000000000
 ```
 
 Test 2:
@@ -848,7 +847,7 @@ Data:    000102030405060708090a0b0c0d0e0f10111213
          c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb
          dcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedee
 
-Parity:  b173d9afcc56f1636e325dc22984f527
+Parity:  07ffcc5e9bfb1c0838aee03603b502aa
 ```
 
 #### A.3.2 - Test vectors for RS(255,223)
@@ -909,8 +908,8 @@ Data:    000102030405060708090a0b0c0d0e0f10111213
          c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb
          dcddde
 
-Parity:  9c04c041d1ce5905b434daf6e5465f92d14ef9c2
-         e2016cc2bbf0773a018bc2aa
+Parity:  93cca4cfe7c914d65c083eb57a634cd5a86f77ed
+         f97b87cf4c05be2478e175d4
 ```
 
 #### A.3.3 - Test vectors for RS(255,191)
@@ -969,10 +968,10 @@ Data:    000102030405060708090a0b0c0d0e0f10111213
          a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3
          b4b5b6b7b8b9babbbcbdbe
 
-Parity:  e8036c9c7298995a41a264a425fd1c9fe71e45f8
-         4f2dbbec9240caa1bbc44ae55529991460cb8bc3
-         2fbbb9e129bc6017f896f6a0a60677c657e04a54
-         dfb7c62a
+Parity:  792316db851127a71e19d44e5fe58400bffdc5be
+         5a73b3b90f1b660ea25f08bfced98819758eabc2
+         586966bee7b5abec7387eea89e0377f623340cf0
+         6209b500
 ```
 
 #### A.3.4 - Test vectors for RS(64,40)
@@ -993,8 +992,8 @@ Test 2:
 Data:    ffffffffffffffffffffffffffffffffffffffff
          ffffffffffffffffffffffffffffffffffffffff
 
-Parity:  e81d42b0548bfb1c5e9d0475a75446c6bda44e0b
-         8ea6e459
+Parity:  579a5af18d3b67e5bfec98bb598dc2b4a5a7714d
+         dc267cd9
 ```
 
 Test 3:
@@ -1003,8 +1002,8 @@ Test 3:
 Data:    000102030405060708090a0b0c0d0e0f10111213
          1415161718191a1b1c1d1e1f2021222324252627
 
-Parity:  9fb10923191a0659292e6e7c5ee8fbf0111329eb
-         8bdaefe8
+Parity:  bb68ae9f872c2d5eb1c486a104d5d0d0e77140d3
+         1e2ae52b
 ```
 
 #### A.3.5 - Test vectors for RS(32,10)
@@ -1022,7 +1021,7 @@ Test 2:
 ```
 Data:    ffffffffffffffffffff
 
-Parity:  ad52e479625d811b5e60e40fafd4eb5b68eeb3847978
+Parity:  6b947c9013410983bf927cd5eafba958214e0fee90ef
 ```
 
 Test 3:
@@ -1030,7 +1029,7 @@ Test 3:
 ```
 Data:    00010203040506070809
 
-Parity:  fe98b737bc91e51a91a17ced02342c9688e2688eb3fd
+Parity:  2e15b80a2d182f2a0e46a888cf8803394a8b5cdba41d
 ```
 
 ## Appendix B: Reference Implementation
@@ -1045,6 +1044,9 @@ Files using this format SHOULD use the extension `.toa`.
 
 ## Revision History
 
+- Version 0.9  (2025-08-22): Changes in the ECC:
+    - Switched polynomial for Reed-Solomon ECC from 0x11D (x^8 + x^4 + x^3 + x^2 + 1) to
+      0x11B (x^8 + x^4 + x^3 + x + 1) for better CPU instruction set support (like x86's GFNI)
 - Version 0.8  (2025-08-22): Spitched from LZMA to LZMA2s for better worst case performance.
 - Version 0.7 (2025-08-21): Update name and some refinements:
     - Changed integer layout from little-endian to big-endian.

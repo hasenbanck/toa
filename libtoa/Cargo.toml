@@ -13,6 +13,7 @@ rust-version = "1.89"
 
 [dependencies]
 blake3 = { workspace = true }
+hex = "0.4.3"
 
 [dev-dependencies]
 hex-literal = { workspace = true }
