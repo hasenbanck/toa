@@ -12,7 +12,6 @@ use super::{
     state::State,
 };
 
-// TODO We could increase this to 4, but we need test data that compressed more than 2 MiB to 64 KiB!
 const LZMA2_UNCOMPRESSED_LIMIT: u32 = (2 << 20) - MATCH_LEN_MAX as u32;
 const LZMA2_COMPRESSED_LIMIT: u32 = (64 << 10) - 26;
 
