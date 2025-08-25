@@ -17,7 +17,7 @@
 //! The code in this file is in the public domain or can be licensed under the Apache 2 License.
 
 /// Building blocks for all codes.
-mod primitives {
+pub(crate) mod primitives {
     use crate::error_invalid_data;
 
     // GF(256) parameters
@@ -88,7 +88,7 @@ mod primitives {
     }
 
     #[inline]
-    const fn gf_alpha_pow(power: isize) -> u8 {
+    pub(crate) const fn gf_alpha_pow(power: isize) -> u8 {
         let mut p = power % 255;
         if p < 0 {
             p += 255;

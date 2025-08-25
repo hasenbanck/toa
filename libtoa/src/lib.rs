@@ -55,7 +55,7 @@ pub(crate) use std::io::Write;
 pub use cv_stack::CVStack;
 #[cfg(feature = "std")]
 pub use decoder::TOAFileDecoder;
-pub use decoder::TOAStreamingDecoder;
+pub use decoder::{ECCDecoder, TOAStreamingDecoder};
 #[cfg(feature = "std")]
 pub use encoder::TOAFileEncoder;
 pub use encoder::{ECCEncoder, TOABlockWriter, TOAOptions, TOAStreamingEncoder};
@@ -294,6 +294,67 @@ impl<R: Read> Read for LimitedReader<R> {
         self.remaining -= bytes_read as u64;
         Ok(bytes_read)
     }
+}
+
+fn detect_ecc_simd_capability() -> (bool, usize) {
+    const ECC_BATCH_SIZE_AVX512: usize = 64;
+    const ECC_BATCH_SIZE_AVX2: usize = 32;
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("gfni") {
+            return (true, ECC_BATCH_SIZE_AVX512);
+        }
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+            return (true, ECC_BATCH_SIZE_AVX2);
+        }
+    }
+
+    (false, 1)
+}
+
+/// Transpose codewords for SIMD processing
+/// From: [codeword0][codeword1][codeword2]...
+/// To:   [byte0_all][byte1_all][byte2_all]...
+#[cfg(target_arch = "x86_64")]
+fn transpose_for_simd<const BATCH: usize, const LEN: usize>(
+    batched_data: &[[u8; LEN]; BATCH],
+) -> [[u8; BATCH]; LEN] {
+    let mut transposed = [[0u8; BATCH]; LEN];
+
+    for (codeword_idx, codeword) in batched_data.iter().enumerate() {
+        for (byte_idx, &byte) in codeword.iter().enumerate() {
+            transposed[byte_idx][codeword_idx] = byte;
+        }
+    }
+
+    transposed
+}
+
+/// Transpose back after SIMD processing
+/// From:   [byte0_all][byte1_all][byte2_all]...
+/// To:     [codeword0][codeword1][codeword2]...
+#[cfg(target_arch = "x86_64")]
+fn transpose_from_simd<const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
+    transposed_data: &[[u8; BATCH]; DATA_LEN],
+    transposed_parity: &[[u8; BATCH]; PARITY_LEN],
+) -> ([[u8; DATA_LEN]; BATCH], [[u8; PARITY_LEN]; BATCH]) {
+    let mut data_codewords = [[0u8; DATA_LEN]; BATCH];
+    let mut parity_codewords = [[0u8; PARITY_LEN]; BATCH];
+
+    for (byte_idx, byte_batch) in transposed_data.iter().enumerate() {
+        for (codeword_idx, &byte) in byte_batch.iter().enumerate() {
+            data_codewords[codeword_idx][byte_idx] = byte;
+        }
+    }
+
+    for (byte_idx, byte_batch) in transposed_parity.iter().enumerate() {
+        for (codeword_idx, &byte) in byte_batch.iter().enumerate() {
+            parity_codewords[codeword_idx][byte_idx] = byte;
+        }
+    }
+
+    (data_codewords, parity_codewords)
 }
 
 #[cfg(test)]

@@ -1,13 +1,11 @@
 use crate::{
     ErrorCorrection, Result, Write,
     circular_buffer::CircularBuffer,
+    detect_ecc_simd_capability,
     reed_solomon::{code_255_191, code_255_223, code_255_239, get_generator_poly},
 };
 
 type EncodeFunction<W> = fn(&mut ECCEncoder<W>, &[u8]) -> Result<usize>;
-
-const BATCH_SIZE_AVX512: usize = 64;
-const BATCH_SIZE_AVX2: usize = 32;
 
 fn encode_none<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     encoder.inner.write_all(data)?;
@@ -56,20 +54,6 @@ fn encode_extreme_avx2<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Re
     unsafe { encoder.encode_batch_avx2::<191, 64>(data) }
 }
 
-fn detect_simd_capability() -> (bool, usize) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("gfni") {
-            return (true, BATCH_SIZE_AVX512);
-        }
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
-            return (true, BATCH_SIZE_AVX2);
-        }
-    }
-
-    (false, 1)
-}
-
 /// Error Correction Code Writer that applies Reed-Solomon encoding to compressed data.
 pub struct ECCEncoder<W> {
     inner: W,
@@ -83,7 +67,7 @@ pub struct ECCEncoder<W> {
 impl<W: Write> ECCEncoder<W> {
     /// Create a new ECCWriter with the specified error correction level.
     pub fn new(inner: W, error_correction: ErrorCorrection) -> Self {
-        let (use_simd, simd_batch_size) = detect_simd_capability();
+        let (use_simd, simd_batch_size) = detect_ecc_simd_capability();
 
         let (encode_fn, uses_buffer, codeword_data_len) = match error_correction {
             ErrorCorrection::None => (encode_none as EncodeFunction<W>, false, 0),
@@ -427,50 +411,6 @@ impl<W: Write> Write for ECCEncoder<W> {
     }
 }
 
-/// Transpose codewords for SIMD processing
-/// From: [codeword0][codeword1][codeword2]...
-/// To:   [byte0_all][byte1_all][byte2_all]...
-#[cfg(target_arch = "x86_64")]
-fn transpose_for_simd<const BATCH: usize, const LEN: usize>(
-    batched_data: &[[u8; LEN]; BATCH],
-) -> [[u8; BATCH]; LEN] {
-    let mut transposed = [[0u8; BATCH]; LEN];
-
-    for (codeword_idx, codeword) in batched_data.iter().enumerate() {
-        for (byte_idx, &byte) in codeword.iter().enumerate() {
-            transposed[byte_idx][codeword_idx] = byte;
-        }
-    }
-
-    transposed
-}
-
-/// Transpose back after SIMD processing
-/// From:   [byte0_all][byte1_all][byte2_all]...
-/// To:     [codeword0][codeword1][codeword2]...
-#[cfg(target_arch = "x86_64")]
-fn transpose_from_simd<const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
-    transposed_data: &[[u8; BATCH]; DATA_LEN],
-    transposed_parity: &[[u8; BATCH]; PARITY_LEN],
-) -> ([[u8; DATA_LEN]; BATCH], [[u8; PARITY_LEN]; BATCH]) {
-    let mut data_codewords = [[0u8; DATA_LEN]; BATCH];
-    let mut parity_codewords = [[0u8; PARITY_LEN]; BATCH];
-
-    for (byte_idx, byte_batch) in transposed_data.iter().enumerate() {
-        for (codeword_idx, &byte) in byte_batch.iter().enumerate() {
-            data_codewords[codeword_idx][byte_idx] = byte;
-        }
-    }
-
-    for (byte_idx, byte_batch) in transposed_parity.iter().enumerate() {
-        for (codeword_idx, &byte) in byte_batch.iter().enumerate() {
-            parity_codewords[codeword_idx][byte_idx] = byte;
-        }
-    }
-
-    (data_codewords, parity_codewords)
-}
-
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,gfni")]
 unsafe fn encode_simd_batch_avx512<
@@ -484,7 +424,7 @@ unsafe fn encode_simd_batch_avx512<
 ) -> Result<()> {
     use core::arch::x86_64::*;
 
-    let transposed_data = transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
+    let transposed_data = crate::transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
     let gen_poly = get_generator_poly::<PARITY_LEN>();
 
     // LFSR-based encoding with SIMD.
@@ -520,7 +460,7 @@ unsafe fn encode_simd_batch_avx512<
     }
 
     let (data_codewords, parity_codewords) =
-        transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
+        crate::transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
 
     for i in 0..BATCH {
         writer.write_all(&data_codewords[i])?;
@@ -543,7 +483,7 @@ unsafe fn encode_simd_batch_avx2<
 ) -> Result<()> {
     use core::arch::x86_64::*;
 
-    let transposed_data = transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
+    let transposed_data = crate::transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
     let gen_poly = get_generator_poly::<PARITY_LEN>();
 
     // LFSR-based encoding with SIMD.
@@ -579,7 +519,7 @@ unsafe fn encode_simd_batch_avx2<
     }
 
     let (data_codewords, parity_codewords) =
-        transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
+        crate::transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
 
     for i in 0..BATCH {
         writer.write_all(&data_codewords[i])?;
