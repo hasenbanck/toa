@@ -30,7 +30,7 @@ impl BCJFilter {
 
 const FILTER_BUF_SIZE: usize = 4096;
 
-/// Decoder that applies BCJ (Branch/Call/Jump) filtering to compressed data.
+/// Reader that applies BCJ (Branch/Call/Jump) filtering to compressed data.
 pub struct BCJDecoder<R> {
     inner: R,
     filter: BCJFilter,
@@ -63,6 +63,16 @@ impl<R> BCJDecoder<R> {
     /// Unwraps the decoder, returning the underlying decoder.
     pub fn into_inner(self) -> R {
         self.inner
+    }
+
+    /// Returns a reference to the inner reader.
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    /// Returns a mutable reference to the inner reader.
+    pub fn inner_mut(&mut self) -> &mut R {
+        &mut self.inner
     }
 
     /// Creates a new BCJ decoder for x86 instruction filtering.
@@ -189,7 +199,7 @@ impl<R: Read> Read for BCJDecoder<R> {
     }
 }
 
-/// Encoder that applies BCJ (Branch/Call/Jump) filtering to data before compression.
+/// Writer that applies BCJ (Branch/Call/Jump) filtering to data before compression.
 pub struct BCJEncoder<W> {
     inner: W,
     filter: BCJFilter,
@@ -205,9 +215,14 @@ impl<W> BCJEncoder<W> {
         }
     }
 
-    /// Unwraps the encoder, returning the underlying encoder.
-    pub fn into_inner(self) -> W {
-        self.inner
+    /// Returns a reference to the inner writer.
+    pub fn inner(&self) -> &W {
+        &self.inner
+    }
+
+    /// Returns a mutable reference to the inner writer.
+    pub fn inner_mut(&mut self) -> &mut W {
+        &mut self.inner
     }
 
     /// Creates a new BCJ encoder for x86 instruction filtering.
@@ -257,30 +272,43 @@ impl<W> BCJEncoder<W> {
     pub fn new_riscv(inner: W, start_pos: usize) -> Self {
         Self::new(inner, BCJFilter::new_riscv(start_pos, true))
     }
+
+    /// Finishes writing by flushing any remaining unprocessed data.
+    /// This should be called when no more data will be written.
+    pub fn finish(mut self) -> crate::Result<W>
+    where
+        W: Write,
+    {
+        if !self.buffer.is_empty() {
+            // Write any remaining unprocessed data.
+            self.inner.write_all(&self.buffer)?;
+            self.buffer.clear();
+        }
+        self.inner.flush()?;
+        Ok(self.inner)
+    }
 }
 
 impl<W: Write> Write for BCJEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> crate::Result<usize> {
-        let data_size = buf.len();
+        let original_len = buf.len();
 
-        if data_size > self.buffer.len() {
-            self.buffer.resize(data_size, 0);
-        }
+        self.buffer.extend_from_slice(buf);
 
-        self.buffer[..data_size].copy_from_slice(buf);
-        let filtered_size = self.filter.code(&mut self.buffer[..data_size]);
+        let filtered_size = self.filter.code(&mut self.buffer);
 
-        // BCJ filters may not process all bytes, so we need to handle the processed portion.
         if filtered_size > 0 {
-            self.inner.write(&self.buffer[..filtered_size])?;
+            self.inner.write_all(&self.buffer[..filtered_size])?;
         }
 
-        // If not all bytes were processed, we need to handle the remainder.
-        if filtered_size < data_size {
-            self.inner.write(&self.buffer[filtered_size..data_size])?;
+        if filtered_size < self.buffer.len() {
+            self.buffer.copy_within(filtered_size.., 0);
+            self.buffer.truncate(self.buffer.len() - filtered_size);
+        } else {
+            self.buffer.clear();
         }
 
-        Ok(data_size)
+        Ok(original_len)
     }
 
     fn flush(&mut self) -> crate::Result<()> {
@@ -297,137 +325,145 @@ mod tests {
 
     #[test]
     fn test_bcj_x86_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-x86");
+        let test_data = std::fs::read("../tests/data/wget-x86").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_x86(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
-        let mut decoder = BCJDecoder::new_x86(Cursor::new(&encoded_buffer), 0);
-        copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
+        let mut decoer = BCJDecoder::new_x86(Cursor::new(&encoded_buffer), 0);
+        copy(&mut decoer, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_arm_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-arm");
+        let test_data = std::fs::read("../tests/data/wget-arm").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_arm(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_arm(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_arm64_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-arm64");
+        let test_data = std::fs::read("../tests/data/wget-arm64").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_arm64(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_arm64(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_arm_thumb_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-arm-thumb");
+        let test_data = std::fs::read("../tests/data/wget-arm-thumb").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_arm_thumb(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_arm_thumb(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_ppc_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-ppc");
+        let test_data = std::fs::read("../tests/data/wget-ppc").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_ppc(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_ppc(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_sparc_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-sparc");
+        let test_data = std::fs::read("../tests/data/wget-sparc").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_sparc(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_sparc(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_ia64_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-ia64");
+        let test_data = std::fs::read("../tests/data/wget-ia64").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_ia64(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_ia64(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 
     #[test]
     fn test_bcj_riscv_roundtrip() {
-        let test_data = include_bytes!("../../../../tests/data/wget-riscv");
+        let test_data = std::fs::read("../tests/data/wget-riscv").unwrap();
 
         let mut encoded_buffer = Vec::new();
         let mut encoder = BCJEncoder::new_riscv(Cursor::new(&mut encoded_buffer), 0);
         copy(&mut test_data.as_slice(), &mut encoder).expect("Failed to encode data");
+        encoder.finish().expect("Failed to finish encoding");
 
-        assert!(test_data.as_slice() != encoded_buffer.as_slice());
+        assert!(test_data != encoded_buffer);
 
         let mut decoded_data = Vec::new();
         let mut decoder = BCJDecoder::new_riscv(Cursor::new(&encoded_buffer), 0);
         copy(&mut decoder, &mut decoded_data).expect("Failed to decode data");
 
-        assert!(test_data.as_slice() == decoded_data.as_slice());
+        assert!(test_data == decoded_data);
     }
 }

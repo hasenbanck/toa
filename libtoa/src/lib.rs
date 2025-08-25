@@ -59,6 +59,7 @@ pub use decoder::TOAStreamingDecoder;
 pub use encoder::TOAFileEncoder;
 pub use encoder::{TOABlockWriter, TOAOptions, TOAStreamingEncoder};
 pub use header::{TOABlockHeader, TOAHeader};
+pub use lzma::filter;
 pub use metadata::TOAMetadata;
 #[cfg(not(feature = "std"))]
 pub use no_std::Error;

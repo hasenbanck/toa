@@ -94,14 +94,14 @@ impl Encoder {
     fn finish(self) -> Result<Vec<u8>> {
         let ecc_encoder = match self {
             Encoder::Lzma(encoder) => encoder.finish()?,
-            Encoder::BcjX86(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjArm(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjArmThumb(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjArm64(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjSparc(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjPowerPc(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjIa64(encoder) => encoder.into_inner().finish()?,
-            Encoder::BcjRiscV(encoder) => encoder.into_inner().finish()?,
+            Encoder::BcjX86(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjArm(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjArmThumb(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjArm64(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjSparc(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjPowerPc(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjIa64(encoder) => encoder.finish()?.finish()?,
+            Encoder::BcjRiscV(encoder) => encoder.finish()?.finish()?,
         };
 
         // Finish the ECCWriter to get the final data.
