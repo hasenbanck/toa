@@ -296,27 +296,10 @@ impl<R: Read> Read for LimitedReader<R> {
     }
 }
 
-fn detect_ecc_simd_capability() -> (bool, usize) {
-    const ECC_BATCH_SIZE_AVX512: usize = 64;
-    const ECC_BATCH_SIZE_AVX2: usize = 32;
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("gfni") {
-            return (true, ECC_BATCH_SIZE_AVX512);
-        }
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
-            return (true, ECC_BATCH_SIZE_AVX2);
-        }
-    }
-
-    (false, 1)
-}
-
 /// Transpose codewords for SIMD processing
 /// From: [codeword0][codeword1][codeword2]...
 /// To:   [byte0_all][byte1_all][byte2_all]...
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn transpose_for_simd<const BATCH: usize, const LEN: usize>(
     batched_data: &[[u8; LEN]; BATCH],
 ) -> [[u8; BATCH]; LEN] {
@@ -334,7 +317,7 @@ fn transpose_for_simd<const BATCH: usize, const LEN: usize>(
 /// Transpose back after SIMD processing
 /// From:   [byte0_all][byte1_all][byte2_all]...
 /// To:     [codeword0][codeword1][codeword2]...
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn transpose_from_simd<const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
     transposed_data: &[[u8; BATCH]; DATA_LEN],
     transposed_parity: &[[u8; BATCH]; PARITY_LEN],

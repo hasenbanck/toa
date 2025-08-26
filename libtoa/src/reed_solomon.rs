@@ -16,6 +16,16 @@
 //!
 //! The code in this file is in the public domain or can be licensed under the Apache 2 License.
 
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn get_generator_poly<const PARITY_LEN: usize>() -> &'static [u8] {
+    match PARITY_LEN {
+        16 => &code_255_239::GEN_POLY[..16],
+        32 => &code_255_223::GEN_POLY[..32],
+        64 => &code_255_191::GEN_POLY[..64],
+        _ => panic!("Unsupported parity length"),
+    }
+}
+
 /// Building blocks for all codes.
 pub(crate) mod primitives {
     use crate::error_invalid_data;
@@ -65,7 +75,7 @@ pub(crate) mod primitives {
     }
 
     #[inline]
-    const fn gf_mul(a: u8, b: u8) -> u8 {
+    pub(crate) const fn gf_mul(a: u8, b: u8) -> u8 {
         if a == 0 || b == 0 {
             0
         } else {
@@ -595,11 +605,12 @@ pub(crate) mod primitives {
 
     #[cfg(test)]
     mod gfni_compatibility_tests {
-        use super::gf_mul;
 
         #[cfg(target_arch = "x86_64")]
         #[test]
         fn test_gfni_vs_table_multiplication() {
+            use super::gf_mul;
+
             if !is_x86_feature_detected!("gfni") || !is_x86_feature_detected!("sse4.1") {
                 println!("GFNI not supported");
                 return;
@@ -637,7 +648,7 @@ pub(crate) mod primitives {
 }
 
 /// Implements RS(255,239)
-pub(crate) mod code_255_239 {
+pub mod code_255_239 {
     /// The size of the data payload.
     const DATA_LEN: usize = 239;
 
@@ -660,7 +671,7 @@ pub(crate) mod code_255_239 {
         super::primitives::gen_poly_const::<PARITY_LEN, _>();
 
     /// Encode 10-byte data with RS(255,239) protection.
-    pub(crate) fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
+    pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
         super::primitives::encode(&GEN_POLY, data)
     }
 
@@ -668,7 +679,7 @@ pub(crate) mod code_255_239 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
+    pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -762,7 +773,7 @@ pub(crate) mod code_255_239 {
 }
 
 /// Implements RS(255,223)
-pub(crate) mod code_255_223 {
+pub mod code_255_223 {
     /// The size of the data payload.
     const DATA_LEN: usize = 223;
 
@@ -785,7 +796,7 @@ pub(crate) mod code_255_223 {
         super::primitives::gen_poly_const::<PARITY_LEN, _>();
 
     /// Encode 10-byte data with RS(255,223) protection.
-    pub(crate) fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
+    pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
         super::primitives::encode(&GEN_POLY, data)
     }
 
@@ -793,7 +804,7 @@ pub(crate) mod code_255_223 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
+    pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -896,7 +907,7 @@ pub(crate) mod code_255_223 {
 }
 
 /// Implements RS(255,191)
-pub(crate) mod code_255_191 {
+pub mod code_255_191 {
 
     /// The size of the data payload.
     const DATA_LEN: usize = 191;
@@ -920,7 +931,7 @@ pub(crate) mod code_255_191 {
         super::primitives::gen_poly_const::<PARITY_LEN, _>();
 
     /// Encode 10-byte data with RS(255,191) protection.
-    pub(crate) fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
+    pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
         super::primitives::encode(&GEN_POLY, data)
     }
 
@@ -928,7 +939,7 @@ pub(crate) mod code_255_191 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
+    pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -1031,7 +1042,7 @@ pub(crate) mod code_255_191 {
 }
 
 /// Implements RS(64,40)
-pub(crate) mod code_64_40 {
+pub mod code_64_40 {
 
     /// The size of the data payload.
     const DATA_LEN: usize = 40;
@@ -1051,11 +1062,11 @@ pub(crate) mod code_64_40 {
     /// Safe upper bound for intermediate polynomials.
     const MAX_POLY: usize = CODEWORD_SIZE;
 
-    static GEN_POLY: [u8; PARITY_LEN_PLUS_ONE] =
+    pub(super) static GEN_POLY: [u8; PARITY_LEN_PLUS_ONE] =
         super::primitives::gen_poly_const::<PARITY_LEN, _>();
 
     /// Encode 40-byte data with RS(64,40) protection.
-    pub(crate) fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
+    pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
         super::primitives::encode(&GEN_POLY, data)
     }
 
@@ -1063,7 +1074,7 @@ pub(crate) mod code_64_40 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
+    pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -1257,7 +1268,7 @@ pub(crate) mod code_64_40 {
 }
 
 /// Implements RS(32,10)
-pub(crate) mod code_32_10 {
+pub mod code_32_10 {
 
     /// The size of the data payload.
     const DATA_LEN: usize = 10;
@@ -1277,11 +1288,11 @@ pub(crate) mod code_32_10 {
     /// Safe upper bound for intermediate polynomials.
     const MAX_POLY: usize = CODEWORD_SIZE;
 
-    static GEN_POLY: [u8; PARITY_LEN_PLUS_ONE] =
+    pub(super) static GEN_POLY: [u8; PARITY_LEN_PLUS_ONE] =
         super::primitives::gen_poly_const::<PARITY_LEN, _>();
 
     /// Encode 10-byte data with RS(32,10) protection.
-    pub(crate) fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
+    pub fn encode(data: &[u8; DATA_LEN]) -> [u8; PARITY_LEN] {
         super::primitives::encode(&GEN_POLY, data)
     }
 
@@ -1289,7 +1300,7 @@ pub(crate) mod code_32_10 {
     ///
     /// Returns false if the data was not corrupted. False if the data was corrected but could be
     /// corrected. Returns an error if the data was corrupted and could not be corrected.
-    pub(crate) fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
+    pub fn decode(codeword: &mut [u8; CODEWORD_SIZE]) -> crate::Result<bool> {
         super::primitives::decode::<
             DATA_LEN,
             PARITY_LEN,
@@ -1343,11 +1354,376 @@ pub(crate) mod code_32_10 {
     }
 }
 
-pub(crate) fn get_generator_poly<const PARITY_LEN: usize>() -> &'static [u8] {
-    match PARITY_LEN {
-        16 => &code_255_239::GEN_POLY[..16],
-        32 => &code_255_223::GEN_POLY[..32],
-        64 => &code_255_191::GEN_POLY[..64],
-        _ => panic!("Unsupported parity length"),
+/// Based on "Screaming Fast Galois Field Arithmetic Using Intel SIMD Instructions" (2023)
+///
+/// http://web.eecs.utk.edu/˜plank/plank/papers/FAST-2013-GF.html
+pub mod simd {
+    /// Const GF(256) multiplication with polynomial 0x11B.
+    const fn gf256_mul(a: u8, b: u8) -> u8 {
+        if a == 0 || b == 0 {
+            return 0;
+        }
+
+        let mut result = 0u8;
+        let mut aa = a;
+        let mut bb = b;
+
+        let mut i = 0;
+        while i < 8 {
+            if bb & 1 != 0 {
+                result ^= aa;
+            }
+            let high_bit = aa & 0x80;
+            aa <<= 1;
+            if high_bit != 0 {
+                aa ^= 0x1B; // Reduction polynomial x^8 + x^4 + x^3 + x + 1
+            }
+            bb >>= 1;
+            i += 1;
+        }
+        result
+    }
+
+    /// Four-bit word lookup tables for GF(256) multiplication.
+    /// Splits bytes into two four-bit words for table lookup.
+    #[derive(Copy, Clone)]
+    pub struct GfFourBitTables {
+        /// Products with low four-bit words (0x00..0x0F).
+        pub low_four: [u8; 16],
+        /// Products with high four-bit words (0x00, 0x10..0xF0).
+        pub high_four: [u8; 16],
+    }
+
+    impl GfFourBitTables {
+        /// Create GF(256) four-bit lookup tables for multiplication by y.
+        pub const fn new(y: u8) -> Self {
+            let mut low = [0u8; 16];
+            let mut high = [0u8; 16];
+
+            let mut i = 0;
+            while i < 16 {
+                low[i] = gf256_mul(i as u8, y);
+                high[i] = gf256_mul((i as u8) << 4, y);
+                i += 1;
+            }
+
+            Self {
+                low_four: low,
+                high_four: high,
+            }
+        }
+    }
+
+    /// Compute α^power in GF(256).
+    const fn gf256_pow(alpha: u8, power: usize) -> u8 {
+        if power == 0 {
+            return 1;
+        }
+
+        let mut result = 1u8;
+        let mut i = 0;
+        while i < power {
+            result = gf256_mul(result, alpha);
+            i += 1;
+        }
+        result
+    }
+
+    /// Generate Reed-Solomon generator polynomial for RS(n, k), we need n-k parity symbols.
+    const fn generate_rs_polynomial<const PARITY_LEN: usize, const PARITY_LEN_PLUS_ONE: usize>()
+    -> [u8; PARITY_LEN_PLUS_ONE] {
+        const ALPHA: u8 = 3; // TOA uses α = 3.
+
+        // Start with g(x) = 1.
+        let mut g = [0u8; PARITY_LEN_PLUS_ONE];
+        g[0] = 1;
+        let mut g_len = 1;
+
+        // Multiply by (x - α^i) for i = 1 to PARITY_LEN.
+        let mut i = 1;
+        while i <= PARITY_LEN {
+            // Compute root = α^i
+            let root = gf256_pow(ALPHA, i);
+
+            // Multiply g by (x - root)
+            // (x - root) means x^1 coefficient is 1, x^0 coefficient is root.
+            let mut new_g = [0u8; PARITY_LEN_PLUS_ONE];
+
+            // Multiply existing g by x (shift coefficients).
+            let mut j = 0;
+            while j < g_len {
+                new_g[j + 1] = g[j];
+                j += 1;
+            }
+
+            // Add g * root term.
+            j = 0;
+            while j < g_len {
+                new_g[j] ^= gf256_mul(g[j], root);
+                j += 1;
+            }
+
+            // Copy back to g.
+            j = 0;
+            while j <= g_len {
+                g[j] = new_g[j];
+                j += 1;
+            }
+            g_len += 1;
+
+            i += 1;
+        }
+
+        g
+    }
+
+    /// RS(255,239) has 16 parity bytes.
+    const RS_255_239_GENERATOR: [u8; 17] = generate_rs_polynomial::<16, 17>();
+
+    /// RS(255,223) has 32 parity bytes.
+    const RS_255_223_GENERATOR: [u8; 33] = generate_rs_polynomial::<32, 33>();
+
+    /// RS(255,191) has 64 parity bytes.
+    const RS_255_191_GENERATOR: [u8; 65] = generate_rs_polynomial::<64, 65>();
+
+    const fn create_rs_tables<const N: usize>(generator: &[u8; N]) -> [[GfFourBitTables; N]; 1] {
+        let mut all_tables = [[GfFourBitTables {
+            low_four: [0; 16],
+            high_four: [0; 16],
+        }; N]; 1];
+
+        let mut i = 0;
+        while i < N {
+            // Skip coefficient 0 (it's always the same)
+            if generator[i] != 0 {
+                all_tables[0][i] = GfFourBitTables::new(generator[i]);
+            }
+            i += 1;
+        }
+
+        all_tables
+    }
+
+    const fn generate_syndrome_tables() -> [GfFourBitTables; 256] {
+        let mut tables = [GfFourBitTables {
+            low_four: [0; 16],
+            high_four: [0; 16],
+        }; 256];
+
+        // Special case: α^0 = 1 (multiplication by 1).
+        tables[0] = GfFourBitTables::new(1);
+
+        // Generate tables for α^1 through α^255.
+        // Note: α^255 = α^0 = 1 due to field properties, but we include it for completeness.
+        let mut k = 1;
+        while k < 256 {
+            let power_mod = k % 255;
+            let alpha_power = if power_mod == 0 {
+                1 // α^255 = α^0 = 1
+            } else {
+                gf256_pow(3, power_mod) // α = 3 for TOA
+            };
+            tables[k] = GfFourBitTables::new(alpha_power);
+            k += 1;
+        }
+
+        tables
+    }
+
+    /// Precomputed Four-Bit Tables for RS(255,239).
+    pub static RS_255_239_TABLES: [[GfFourBitTables; 17]; 1] =
+        create_rs_tables(&RS_255_239_GENERATOR);
+
+    /// Precomputed Four-Bit Tables for RS(255,223).
+    pub static RS_255_223_TABLES: [[GfFourBitTables; 33]; 1] =
+        create_rs_tables(&RS_255_223_GENERATOR);
+
+    /// Precomputed Four-Bit Tables for RS(255,191).
+    pub static RS_255_191_TABLES: [[GfFourBitTables; 65]; 1] =
+        create_rs_tables(&RS_255_191_GENERATOR);
+
+    /// Precomputed Four-Bit Tables for the syndrome calculation in RS(255,*).
+    pub static RS_255_SYNDROME_TABLES: [GfFourBitTables; 256] = generate_syndrome_tables();
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::reed_solomon::{code_255_191, code_255_223, code_255_239, primitives};
+
+        #[test]
+        fn test_gf256_mul_compatibility() {
+            for a in 0..=255u8 {
+                for b in 0..=255u8 {
+                    let simd_result = gf256_mul(a, b);
+                    let table_result = primitives::gf_mul(a, b);
+                    assert_eq!(
+                        simd_result, table_result,
+                        "Mismatch at a={a}, b={b}: simd={simd_result}, table={table_result}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_four_bit_tables_compatibility() {
+            let test_multipliers = [1, 2, 3, 7, 15, 31, 63, 127, 128, 255];
+
+            for y in test_multipliers {
+                let tables = GfFourBitTables::new(y);
+
+                // Test all possible byte values.
+                for byte_val in 0..=255u8 {
+                    let low_nibble = byte_val & 0x0F;
+                    let high_nibble = byte_val >> 4;
+
+                    // Compute using four-bit tables.
+                    let low_product = tables.low_four[low_nibble as usize];
+                    let high_product = tables.high_four[high_nibble as usize];
+                    let table_result = low_product ^ high_product;
+
+                    // Compute using primitives.
+                    let expected = primitives::gf_mul(byte_val, y);
+
+                    assert_eq!(
+                        table_result, expected,
+                        "Four-bit table mismatch for y={y}, byte={byte_val}: got {table_result}, expected {expected}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_generator_polynomial_compatibility() {
+            assert_eq!(RS_255_239_GENERATOR.len(), 17);
+            for i in 0..17 {
+                assert_eq!(
+                    RS_255_239_GENERATOR[i],
+                    code_255_239::GEN_POLY[i],
+                    "RS(255,239) generator mismatch at index {i}"
+                );
+            }
+
+            assert_eq!(RS_255_223_GENERATOR.len(), 33);
+            for i in 0..33 {
+                assert_eq!(
+                    RS_255_223_GENERATOR[i],
+                    code_255_223::GEN_POLY[i],
+                    "RS(255,223) generator mismatch at index {i}"
+                );
+            }
+
+            assert_eq!(RS_255_191_GENERATOR.len(), 65);
+            for i in 0..65 {
+                assert_eq!(
+                    RS_255_191_GENERATOR[i],
+                    code_255_191::GEN_POLY[i],
+                    "RS(255,191) generator mismatch at index {i}"
+                );
+            }
+        }
+
+        #[test]
+        fn test_four_bit_table_multiplication_simulation() {
+            // Simulate the actual four-bit table multiplication process.
+            let test_cases = [
+                (7u8, vec![0x39, 0x1D, 0x9F, 0x5A, 0xAA, 0xAB, 0x15, 0xC3]),
+                (3u8, vec![0x00, 0x01, 0xFF, 0x80, 0x40, 0x20, 0x10, 0x08]),
+                (255u8, vec![0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]),
+            ];
+
+            for (multiplier, test_bytes) in test_cases {
+                let tables = GfFourBitTables::new(multiplier);
+
+                for input in test_bytes {
+                    // Simulate the shuffle operation.
+                    let low_nibble = input & 0x0F;
+                    let high_nibble = input >> 4;
+
+                    // Table lookups.
+                    let l = tables.low_four[low_nibble as usize];
+                    let h = tables.high_four[high_nibble as usize];
+
+                    // XOR to combine.
+                    let result = l ^ h;
+
+                    // Verify against reference.
+                    let expected = primitives::gf_mul(input, multiplier);
+                    assert_eq!(
+                        result, expected,
+                        "Simulation mismatch: {input} * {multiplier} = {result} (expected {expected})"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_edge_cases() {
+            let tables_zero = GfFourBitTables::new(0);
+            for i in 0..16 {
+                assert_eq!(tables_zero.low_four[i], 0);
+                assert_eq!(tables_zero.high_four[i], 0);
+            }
+
+            let tables_one = GfFourBitTables::new(1);
+            for i in 0..16 {
+                assert_eq!(tables_one.low_four[i], i as u8);
+                assert_eq!(tables_one.high_four[i], (i as u8) << 4);
+            }
+
+            // Test that table entries match direct computation.
+            for multiplier in [2, 3, 7, 15, 127, 255] {
+                let tables = GfFourBitTables::new(multiplier);
+
+                for i in 0..16 {
+                    assert_eq!(
+                        tables.low_four[i],
+                        primitives::gf_mul(i as u8, multiplier),
+                        "Low table mismatch for multiplier {} at index {}",
+                        multiplier,
+                        i
+                    );
+                }
+
+                for i in 0..16 {
+                    assert_eq!(
+                        tables.high_four[i],
+                        primitives::gf_mul((i as u8) << 4, multiplier),
+                        "High table mismatch for multiplier {} at index {}",
+                        multiplier,
+                        i
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_syndrome_table_values() {
+            for power in 0..=255 {
+                let alpha_value = if power == 0 {
+                    1 // α^0 = 1
+                } else {
+                    primitives::gf_alpha_pow(power as isize)
+                };
+
+                let tables = &RS_255_SYNDROME_TABLES[power];
+
+                for test_byte in [0x00, 0x01, 0x02, 0x0F, 0x10, 0xF0, 0xFF] {
+                    let low_nibble = test_byte & 0x0F;
+                    let high_nibble = test_byte >> 4;
+
+                    let low_product = tables.low_four[low_nibble as usize];
+                    let high_product = tables.high_four[high_nibble as usize];
+                    let table_result = low_product ^ high_product;
+
+                    let expected = primitives::gf_mul(test_byte, alpha_value);
+
+                    assert_eq!(
+                        table_result, expected,
+                        "Syndrome table mismatch for power={}, α^power={:#04x}, byte={:#04x}: got {:#04x}, expected {:#04x}",
+                        power, alpha_value, test_byte, table_result, expected
+                    );
+                }
+            }
+        }
     }
 }
