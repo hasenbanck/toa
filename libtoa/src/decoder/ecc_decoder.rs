@@ -3,7 +3,10 @@ use alloc::{vec, vec::Vec};
 #[cfg(target_arch = "x86_64")]
 const ECC_BATCH_SIZE_AVX2: usize = 32;
 
-#[cfg(all(target_arch = "aarch64", feature = "std"))]
+#[cfg(target_arch = "x86_64")]
+const ECC_BATCH_SIZE_SSSE3: usize = 16;
+
+#[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "std")))]
 use crate::reed_solomon::simd::RS_255_SYNDROME_TABLES;
 use crate::{
     ErrorCorrection, Read, Result, SimdOverride,
@@ -106,7 +109,7 @@ where
         buf[total_written..total_written + write_len].copy_from_slice(&data_slice[..write_len]);
         total_written += write_len;
 
-        // If there's overflow, buffer it for next call..
+        // If there's overflow, buffer it for next call.
         if write_len < data_slice.len() {
             // Buffer overflow data when output buffer is smaller than codeword data.
             // This happens when buf.len() < data_len (e.g., 100 bytes < 239 bytes).
@@ -174,6 +177,33 @@ fn decode_batch_extreme_avx2<R: Read>(
     unsafe { decode_simd_batch_avx2::<R, 32, 191, 64>(decoder, buf, bytes_read) }
 }
 
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_standard_ssse3<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe { decode_simd_batch_ssse3::<R, 16, 239, 16>(decoder, buf, bytes_read) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_paranoid_ssse3<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe { decode_simd_batch_ssse3::<R, 16, 223, 32>(decoder, buf, bytes_read) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_extreme_ssse3<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe { decode_simd_batch_ssse3::<R, 16, 191, 64>(decoder, buf, bytes_read) }
+}
+
 #[cfg(all(target_arch = "aarch64", feature = "std"))]
 fn decode_batch_standard_neon<R: Read>(
     decoder: &mut ECCDecoder<R>,
@@ -223,7 +253,8 @@ unsafe fn decode_simd_batch_avx2_gfni<
         &decoder.aligned_batch_buffer[decoder.aligned_offset..decoder.aligned_offset + bytes_read];
 
     // Convert aligned buffer to codewords using zero-copy alignment.
-    let (_prefix, aligned_codewords, _suffix) = unsafe { aligned_buffer.align_to::<[u8; 255]>() };
+    let (prefix, aligned_codewords, _suffix) = unsafe { aligned_buffer.align_to::<[u8; 255]>() };
+    assert!(prefix.is_empty());
 
     let batch_array: &[[u8; 255]; BATCH] = aligned_codewords[..BATCH]
         .try_into()
@@ -351,7 +382,8 @@ unsafe fn decode_simd_batch_avx2<
         &decoder.aligned_batch_buffer[decoder.aligned_offset..decoder.aligned_offset + bytes_read];
 
     // Convert aligned buffer to codewords using zero-copy alignment.
-    let (_prefix, aligned_codewords, _suffix) = unsafe { aligned_buffer.align_to::<[u8; 255]>() };
+    let (prefix, aligned_codewords, _suffix) = unsafe { aligned_buffer.align_to::<[u8; 255]>() };
+    assert!(prefix.is_empty());
 
     let batch_array: &[[u8; 255]; BATCH] = aligned_codewords[..BATCH]
         .try_into()
@@ -421,7 +453,7 @@ unsafe fn decode_simd_batch_avx2<
             // Copy to batch_codewords for error correction.
             decoder.batch_codewords[codeword_idx] = batch_array[codeword_idx];
 
-            // Fall back to scalar Reed-Solomon correction
+            // Fall back to scalar Reed-Solomon correction.
             let decode_fn = match PARITY_LEN {
                 16 => code_255_239::decode,
                 32 => code_255_223::decode,
@@ -453,6 +485,195 @@ unsafe fn decode_simd_batch_avx2<
     }
 
     Ok(written)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn apply_avx2_gf_multiplication(
+    data_vec: core::arch::x86_64::__m256i,
+    power: usize,
+) -> core::arch::x86_64::__m256i {
+    use core::arch::x86_64::*;
+
+    // Get the four-bit lookup tables for multiplying by α^power.
+    let tables = &RS_255_SYNDROME_TABLES[power];
+
+    // Extract low and high nibbles from data vector.
+    let low_nibble_mask = _mm256_set1_epi8(0x0F_u8 as i8);
+    let low_nibbles = _mm256_and_si256(data_vec, low_nibble_mask);
+    let high_nibbles = _mm256_srli_epi16::<4>(data_vec);
+    let high_nibbles = _mm256_and_si256(high_nibbles, low_nibble_mask);
+
+    // Perform table lookups for low nibbles.
+    // Note: We need to duplicate the 16-byte table to fill the 32-byte AVX2 register.
+    let low_table_128 = unsafe { _mm_loadu_si128(tables.low_four.as_ptr() as *const __m128i) };
+    let low_table = _mm256_broadcastsi128_si256(low_table_128);
+    let low_products = _mm256_shuffle_epi8(low_table, low_nibbles);
+
+    // Perform table lookups for high nibbles.
+    let high_table_128 = unsafe { _mm_loadu_si128(tables.high_four.as_ptr() as *const __m128i) };
+    let high_table = _mm256_broadcastsi128_si256(high_table_128);
+    let high_products = _mm256_shuffle_epi8(high_table, high_nibbles);
+
+    // Combine low and high products.
+    _mm256_xor_si256(low_products, high_products)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn decode_simd_batch_ssse3<
+    R: Read,
+    const BATCH: usize,
+    const DATA_LEN: usize,
+    const PARITY_LEN: usize,
+>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    use core::arch::x86_64::*;
+
+    assert!(buf.len() >= BATCH * DATA_LEN);
+    assert_eq!(bytes_read, BATCH * 255);
+
+    // Get aligned batch buffer - exactly BATCH * 255 bytes.
+    let aligned_buffer =
+        &decoder.aligned_batch_buffer[decoder.aligned_offset..decoder.aligned_offset + bytes_read];
+
+    // Convert aligned buffer to codewords using zero-copy alignment.
+    let (prefix, aligned_codewords, _suffix) = unsafe { aligned_buffer.align_to::<[u8; 255]>() };
+    assert!(prefix.is_empty());
+
+    let batch_array: &[[u8; 255]; BATCH] = aligned_codewords[..BATCH]
+        .try_into()
+        .map_err(|_| error_invalid_data("batch slice conversion failed"))?;
+
+    // Skip syndrome calculation entirely if validation is disabled.
+    if !decoder.validate_rs {
+        let mut written = 0;
+
+        // Zero-copy path - direct access to aligned data.
+        for codeword_idx in 0..BATCH {
+            debug_assert!(written < buf.len());
+
+            let data_slice = &batch_array[codeword_idx][..DATA_LEN];
+            let write_len = buf[written..].len().min(data_slice.len());
+            buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
+            written += write_len;
+
+            if write_len < data_slice.len() {
+                decoder.buffer.append(&data_slice[write_len..]);
+            }
+        }
+        return Ok(written);
+    }
+
+    // Calculate syndromes for all codewords in parallel (only when validation is enabled).
+    let transposed_codewords = crate::transpose_for_simd::<BATCH, 255>(batch_array);
+    let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
+
+    // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
+    for syndrome_idx in 0..PARITY_LEN {
+        let mut syndrome_vec = _mm_setzero_si128();
+
+        for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
+            let data_vec = unsafe { _mm_loadu_si128(byte_slice.as_ptr() as *const __m128i) };
+
+            // Calculate α^(syndrome_idx * byte_pos) for all positions.
+            let power = ((syndrome_idx + 1) * byte_pos) % 255;
+
+            // Multiply data by α^power using table lookup.
+            let multiplied = unsafe { apply_ssse3_gf_multiplication(data_vec, power) };
+
+            // Add to syndrome accumulator.
+            syndrome_vec = _mm_xor_si128(syndrome_vec, multiplied);
+        }
+
+        unsafe {
+            _mm_storeu_si128(
+                syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m128i,
+                syndrome_vec,
+            );
+        }
+    }
+
+    // Process each codeword based on its syndromes.
+    let mut written = 0;
+
+    for codeword_idx in 0..BATCH {
+        debug_assert!(written < buf.len());
+
+        // Check if this codeword has errors (any non-zero syndrome).
+        let has_errors = syndromes_transposed
+            .iter()
+            .any(|syndrome_row| syndrome_row[codeword_idx] != 0);
+
+        let data_slice = if has_errors && decoder.validate_rs {
+            // Copy to batch_codewords for error correction.
+            decoder.batch_codewords[codeword_idx] = batch_array[codeword_idx];
+
+            // Fall back to scalar Reed-Solomon correction.
+            let decode_fn = match PARITY_LEN {
+                16 => code_255_239::decode,
+                32 => code_255_223::decode,
+                64 => code_255_191::decode,
+                _ => return Err(error_invalid_data("unsupported parity length")),
+            };
+
+            let corrected =
+                decode_fn(&mut decoder.batch_codewords[codeword_idx]).map_err(|_| {
+                    error_invalid_data("error correction couldn't correct a faulty block")
+                })?;
+
+            if corrected {
+                eprintln!("Error correction corrected a faulty block in SIMD batch");
+            }
+
+            // Use corrected data
+            &decoder.batch_codewords[codeword_idx][..DATA_LEN]
+        } else {
+            // Use zero-copy path for error-free codewords
+            &batch_array[codeword_idx][..DATA_LEN]
+        };
+
+        let write_len = buf[written..].len().min(data_slice.len());
+        buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
+        written += write_len;
+
+        debug_assert!(write_len == data_slice.len());
+    }
+
+    Ok(written)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn apply_ssse3_gf_multiplication(
+    data_vec: core::arch::x86_64::__m128i,
+    power: usize,
+) -> core::arch::x86_64::__m128i {
+    use core::arch::x86_64::*;
+
+    // Get the four-bit lookup tables for multiplying by α^power.
+    let tables = &RS_255_SYNDROME_TABLES[power];
+
+    // Extract low and high nibbles from data vector.
+    let low_nibble_mask = _mm_set1_epi8(0x0F_u8 as i8);
+    let low_nibbles = _mm_and_si128(data_vec, low_nibble_mask);
+    let high_nibbles = _mm_srli_epi16::<4>(data_vec);
+    let high_nibbles = _mm_and_si128(high_nibbles, low_nibble_mask);
+
+    // Perform table lookups for low nibbles.
+    // Note: For SSE, the table is already 16 bytes, perfect for __m128i.
+    let low_table = unsafe { _mm_loadu_si128(tables.low_four.as_ptr() as *const __m128i) };
+    let low_products = _mm_shuffle_epi8(low_table, low_nibbles);
+
+    // Perform table lookups for high nibbles.
+    let high_table = unsafe { _mm_loadu_si128(tables.high_four.as_ptr() as *const __m128i) };
+    let high_products = _mm_shuffle_epi8(high_table, high_nibbles);
+
+    // Combine low and high products.
+    _mm_xor_si128(low_products, high_products)
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "std"))]
@@ -609,38 +830,6 @@ unsafe fn apply_neon_gf_multiplication(
     veorq_u8(low_products, high_products)
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
-unsafe fn apply_avx2_gf_multiplication(
-    data_vec: core::arch::x86_64::__m256i,
-    power: usize,
-) -> core::arch::x86_64::__m256i {
-    use core::arch::x86_64::*;
-
-    // Get the four-bit lookup tables for multiplying by α^power.
-    let tables = &crate::reed_solomon::simd::RS_255_SYNDROME_TABLES[power];
-
-    // Extract low and high nibbles from data vector.
-    let low_nibble_mask = _mm256_set1_epi8(0x0F_u8 as i8);
-    let low_nibbles = _mm256_and_si256(data_vec, low_nibble_mask);
-    let high_nibbles = _mm256_srli_epi16::<4>(data_vec);
-    let high_nibbles = _mm256_and_si256(high_nibbles, low_nibble_mask);
-
-    // Perform table lookups for low nibbles.
-    // Note: We need to duplicate the 16-byte table to fill the 32-byte AVX2 register.
-    let low_table_128 = unsafe { _mm_loadu_si128(tables.low_four.as_ptr() as *const __m128i) };
-    let low_table = _mm256_broadcastsi128_si256(low_table_128);
-    let low_products = _mm256_shuffle_epi8(low_table, low_nibbles);
-
-    // Perform table lookups for high nibbles.
-    let high_table_128 = unsafe { _mm_loadu_si128(tables.high_four.as_ptr() as *const __m128i) };
-    let high_table = _mm256_broadcastsi128_si256(high_table_128);
-    let high_products = _mm256_shuffle_epi8(high_table, high_nibbles);
-
-    // Combine low and high products.
-    _mm256_xor_si256(low_products, high_products)
-}
-
 /// Error Correction Code Decoder that applies Reed-Solomon decoding to compressed data.
 pub struct ECCDecoder<R> {
     inner: R,
@@ -676,6 +865,11 @@ impl<R: Read> ECCDecoder<R> {
                         Some(decode_batch_standard_avx2 as DecodeBatchFunction<R>),
                         ECC_BATCH_SIZE_AVX2,
                     )
+                } else if is_x86_feature_detected!("ssse3") {
+                    (
+                        Some(decode_batch_standard_ssse3 as DecodeBatchFunction<R>),
+                        ECC_BATCH_SIZE_SSSE3,
+                    )
                 } else {
                     (None, 16)
                 }
@@ -691,6 +885,11 @@ impl<R: Read> ECCDecoder<R> {
                         Some(decode_batch_paranoid_avx2 as DecodeBatchFunction<R>),
                         ECC_BATCH_SIZE_AVX2,
                     )
+                } else if is_x86_feature_detected!("ssse3") {
+                    (
+                        Some(decode_batch_paranoid_ssse3 as DecodeBatchFunction<R>),
+                        ECC_BATCH_SIZE_SSSE3,
+                    )
                 } else {
                     (None, 16)
                 }
@@ -705,6 +904,11 @@ impl<R: Read> ECCDecoder<R> {
                     (
                         Some(decode_batch_extreme_avx2 as DecodeBatchFunction<R>),
                         ECC_BATCH_SIZE_AVX2,
+                    )
+                } else if is_x86_feature_detected!("ssse3") {
+                    (
+                        Some(decode_batch_extreme_ssse3 as DecodeBatchFunction<R>),
+                        ECC_BATCH_SIZE_SSSE3,
                     )
                 } else {
                     (None, 16)
@@ -754,6 +958,29 @@ impl<R: Read> ECCDecoder<R> {
         match override_setting {
             SimdOverride::Auto => Self::get_batch_function(error_correction),
             SimdOverride::ForceScalar => (None, 1),
+            #[cfg(target_arch = "x86_64")]
+            SimdOverride::ForceSsse3 => {
+                if is_x86_feature_detected!("ssse3") {
+                    match error_correction {
+                        ErrorCorrection::None => (None, 1),
+                        ErrorCorrection::Standard => (
+                            Some(decode_batch_standard_ssse3 as DecodeBatchFunction<R>),
+                            ECC_BATCH_SIZE_SSSE3,
+                        ),
+                        ErrorCorrection::Paranoid => (
+                            Some(decode_batch_paranoid_ssse3 as DecodeBatchFunction<R>),
+                            ECC_BATCH_SIZE_SSSE3,
+                        ),
+                        ErrorCorrection::Extreme => (
+                            Some(decode_batch_extreme_ssse3 as DecodeBatchFunction<R>),
+                            ECC_BATCH_SIZE_SSSE3,
+                        ),
+                    }
+                } else {
+                    eprintln!("Warning: SSSE3 requested but not available, falling back to scalar");
+                    (None, 1)
+                }
+            }
             #[cfg(target_arch = "x86_64")]
             SimdOverride::ForceAvx2 => {
                 if is_x86_feature_detected!("avx2") {
@@ -951,8 +1178,14 @@ impl<R: Read> ECCDecoder<R> {
                     } else if bytes_read == 0 {
                         // EOF
                         break;
+                    } else {
+                        // Partial batch - process what we have with single processing.
+                        // This can happen at the end of a block, since we can't look ahead.
+                        let single_written =
+                            (self.decode_single_fn)(self, &mut buf[written..], bytes_read)?;
+                        written += single_written;
+                        continue;
                     }
-                    // Fall through to single processing for partial batch or insufficient space.
                 }
             }
 
@@ -1146,23 +1379,23 @@ mod tests {
             simd_override: SimdOverride,
             test_name: &str,
         ) -> bool {
-            let test_data =
-                b"Hello, World! This is a test of SIMD consistency across all decoder paths."
-                    .repeat(20);
+            // It's important to test an "uneven" amount of data here, meaning data that doesn't
+            // align with the batch sizes.
+            let test_data = vec![0x42u8; 782 * 1024];
 
-            // Encode data first using the encoder
+            // Encode data first using the encoder.
             let mut encoded_output = Vec::new();
             let mut ecc_encoder =
                 ECCEncoder::new(&mut encoded_output, error_correction, SimdOverride::Auto);
             ecc_encoder.write_all(&test_data).unwrap();
             ecc_encoder.finish().unwrap();
 
-            // Decode with scalar reference
+            // Decode with scalar reference.
             let mut scalar_output = Vec::new();
             let mut scalar_decoder = ECCDecoder::new(
                 encoded_output.as_slice(),
                 error_correction,
-                false,
+                true,
                 SimdOverride::ForceScalar,
             );
             let mut temp_buf = [0u8; 4096];
@@ -1174,12 +1407,12 @@ mod tests {
                 scalar_output.extend_from_slice(&temp_buf[..bytes_read]);
             }
 
-            // Decode with SIMD override
+            // Decode with SIMD override.
             let mut simd_output = Vec::new();
             let mut simd_decoder = ECCDecoder::new(
                 encoded_output.as_slice(),
                 error_correction,
-                false,
+                true,
                 simd_override,
             );
             let mut temp_buf = [0u8; 4096];
@@ -1222,6 +1455,14 @@ mod tests {
 
             #[cfg(target_arch = "x86_64")]
             {
+                if is_x86_feature_detected!("ssse3") {
+                    let test_name = format!("SSSE3 vs Scalar - {ec_name}");
+                    all_passed &=
+                        test_simd_path_consistency(ec, SimdOverride::ForceSsse3, &test_name);
+                } else {
+                    println!("⊗ SSSE3 not available on this CPU - {ec_name}");
+                }
+
                 if is_x86_feature_detected!("avx2") {
                     let test_name = format!("AVX2 (pure) vs Scalar - {ec_name}");
                     all_passed &=
