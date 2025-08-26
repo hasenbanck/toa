@@ -10,7 +10,7 @@ pub use file_decoder::TOAFileDecoder;
 pub use streaming_decoder::TOAStreamingDecoder;
 
 use crate::{
-    ErrorCorrection, Prefilter, Read, Result,
+    ErrorCorrection, Prefilter, Read, Result, SimdOverride,
     lzma::{LZMA2sDecoder, filter::bcj::BCJDecoder},
 };
 
@@ -57,7 +57,8 @@ impl<R: Read> Decoder<R> {
         pb: u8,
         dict_size: u32,
     ) -> Result<Self> {
-        let ecc_decoder = ECCDecoder::new(decoder, error_correction, validate_rs);
+        let ecc_decoder =
+            ECCDecoder::new(decoder, error_correction, validate_rs, SimdOverride::Auto);
 
         let lzma_decoder = LZMA2sDecoder::new(
             ecc_decoder,

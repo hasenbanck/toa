@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use blake3::hazmat::HasherExt;
 
 use crate::{
-    Prefilter, Result, TOAOptions, Write,
+    Prefilter, Result, SimdOverride, TOAOptions, Write,
     encoder::ecc_encoder::ECCEncoder,
     error_invalid_data,
     header::TOABlockHeader,
@@ -57,7 +57,7 @@ impl Write for Encoder {
 impl Encoder {
     /// Create a new encoder chain based on the options.
     fn new(options: &TOAOptions, block_size: u64, buffer: Vec<u8>) -> Self {
-        let ecc_encoder = ECCEncoder::new(buffer, options.error_correction);
+        let ecc_encoder = ECCEncoder::new(buffer, options.error_correction, SimdOverride::Auto);
 
         let lzma_encoder = LZMA2sEncoder::new(
             ecc_encoder,

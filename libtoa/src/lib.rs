@@ -340,6 +340,24 @@ fn transpose_from_simd<const BATCH: usize, const DATA_LEN: usize, const PARITY_L
     (data_codewords, parity_codewords)
 }
 
+/// SIMD override for controlling SIMD code paths.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SimdOverride {
+    /// Automatically detect and use the best available SIMD path.
+    Auto,
+    /// Force using scalar path.
+    ForceScalar,
+    #[cfg(target_arch = "x86_64")]
+    /// Force using AVX2 path.
+    ForceAvx2,
+    #[cfg(target_arch = "x86_64")]
+    /// Force using AVX2 + GFNI path.
+    ForceAvx2Gfni,
+    #[cfg(target_arch = "aarch64")]
+    /// Force using NEON path.
+    ForceNeon,
+}
+
 #[cfg(test)]
 mod tests {
     pub(crate) struct Lcg(u64);

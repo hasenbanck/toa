@@ -1,10 +1,15 @@
 #[cfg(target_arch = "x86_64")]
 use crate::reed_solomon::get_generator_poly;
 use crate::{
-    ErrorCorrection, Result, Write,
+    ErrorCorrection, Result, SimdOverride, Write,
     circular_buffer::CircularBuffer,
     reed_solomon::{code_255_191, code_255_223, code_255_239},
 };
+
+#[cfg(target_arch = "x86_64")]
+const ECC_BATCH_SIZE_AVX2: usize = 32;
+#[cfg(target_arch = "aarch64")]
+const ECC_BATCH_SIZE_NEON: usize = 16;
 
 type EncodeFunction<W> = fn(&mut ECCEncoder<W>, &[u8]) -> Result<usize>;
 
@@ -26,18 +31,18 @@ fn encode_extreme<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_standard_avx512<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx512::<239, 16>(data) }
+fn encode_standard_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+    unsafe { encoder.encode_batch_avx2_gfni::<239, 16>(data) }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_paranoid_avx512<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx512::<223, 32>(data) }
+fn encode_paranoid_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+    unsafe { encoder.encode_batch_avx2_gfni::<223, 32>(data) }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_extreme_avx512<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx512::<191, 64>(data) }
+fn encode_extreme_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+    unsafe { encoder.encode_batch_avx2_gfni::<191, 64>(data) }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -83,18 +88,15 @@ pub struct ECCEncoder<W> {
 impl<W: Write> ECCEncoder<W> {
     #[cfg(target_arch = "x86_64")]
     fn get_simd_function(error_correction: ErrorCorrection) -> (Option<EncodeFunction<W>>, usize) {
-        const ECC_BATCH_SIZE_AVX512: usize = 64;
-        const ECC_BATCH_SIZE_AVX2: usize = 32;
-
         match error_correction {
             ErrorCorrection::None => (None, 1),
             ErrorCorrection::Standard => {
-                if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("gfni") {
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
-                        Some(encode_standard_avx512 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX512,
+                        Some(encode_standard_avx2_gfni as EncodeFunction<W>),
+                        ECC_BATCH_SIZE_AVX2,
                     )
-                } else if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(encode_standard_avx2 as EncodeFunction<W>),
                         ECC_BATCH_SIZE_AVX2,
@@ -104,12 +106,12 @@ impl<W: Write> ECCEncoder<W> {
                 }
             }
             ErrorCorrection::Paranoid => {
-                if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("gfni") {
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
-                        Some(encode_paranoid_avx512 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX512,
+                        Some(encode_paranoid_avx2_gfni as EncodeFunction<W>),
+                        ECC_BATCH_SIZE_AVX2,
                     )
-                } else if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(encode_paranoid_avx2 as EncodeFunction<W>),
                         ECC_BATCH_SIZE_AVX2,
@@ -119,12 +121,12 @@ impl<W: Write> ECCEncoder<W> {
                 }
             }
             ErrorCorrection::Extreme => {
-                if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("gfni") {
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
-                        Some(encode_extreme_avx512 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX512,
+                        Some(encode_extreme_avx2_gfni as EncodeFunction<W>),
+                        ECC_BATCH_SIZE_AVX2,
                     )
-                } else if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(encode_extreme_avx2 as EncodeFunction<W>),
                         ECC_BATCH_SIZE_AVX2,
@@ -139,8 +141,6 @@ impl<W: Write> ECCEncoder<W> {
     #[cfg(all(feature = "std", target_arch = "aarch64"))]
     fn get_simd_function(error_correction: ErrorCorrection) -> (Option<EncodeFunction<W>>, usize) {
         use std::arch::is_aarch64_feature_detected;
-
-        const ECC_BATCH_SIZE_NEON: usize = 16;
 
         match error_correction {
             ErrorCorrection::None => (None, 1),
@@ -182,9 +182,103 @@ impl<W: Write> ECCEncoder<W> {
         (None, 1)
     }
 
-    /// Create a new ECCWriter with the specified error correction level.
-    pub fn new(inner: W, error_correction: ErrorCorrection) -> Self {
-        let (encode_fn_simd, simd_batch_size) = Self::get_simd_function(error_correction);
+    fn apply_simd_override(
+        error_correction: ErrorCorrection,
+        override_setting: SimdOverride,
+    ) -> (Option<EncodeFunction<W>>, usize) {
+        match override_setting {
+            SimdOverride::Auto => Self::get_simd_function(error_correction),
+            SimdOverride::ForceScalar => (None, 1),
+            #[cfg(target_arch = "x86_64")]
+            SimdOverride::ForceAvx2 => {
+                if is_x86_feature_detected!("avx2") {
+                    match error_correction {
+                        ErrorCorrection::None => (None, 1),
+                        ErrorCorrection::Standard => (
+                            Some(encode_standard_avx2 as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_AVX2,
+                        ),
+                        ErrorCorrection::Paranoid => (
+                            Some(encode_paranoid_avx2 as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_AVX2,
+                        ),
+                        ErrorCorrection::Extreme => (
+                            Some(encode_extreme_avx2 as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_AVX2,
+                        ),
+                    }
+                } else {
+                    eprintln!("Warning: AVX2 requested but not available, falling back to scalar");
+                    (None, 1)
+                }
+            }
+            #[cfg(target_arch = "x86_64")]
+            SimdOverride::ForceAvx2Gfni => {
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                    match error_correction {
+                        ErrorCorrection::None => (None, 1),
+                        ErrorCorrection::Standard => (
+                            Some(encode_standard_avx2_gfni as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_AVX2,
+                        ),
+                        ErrorCorrection::Paranoid => (
+                            Some(encode_paranoid_avx2_gfni as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_AVX2,
+                        ),
+                        ErrorCorrection::Extreme => (
+                            Some(encode_extreme_avx2_gfni as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_AVX2,
+                        ),
+                    }
+                } else {
+                    eprintln!(
+                        "Warning: AVX2+GFNI requested but not available, falling back to scalar"
+                    );
+                    (None, 1)
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            SimdOverride::ForceNeon => {
+                #[cfg(feature = "std")]
+                {
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        match error_correction {
+                            ErrorCorrection::None => (None, 1),
+                            ErrorCorrection::Standard => (
+                                Some(encode_standard_neon as EncodeFunction<W>),
+                                ECC_BATCH_SIZE_NEON,
+                            ),
+                            ErrorCorrection::Paranoid => (
+                                Some(encode_paranoid_neon as EncodeFunction<W>),
+                                ECC_BATCH_SIZE_NEON,
+                            ),
+                            ErrorCorrection::Extreme => (
+                                Some(encode_extreme_neon as EncodeFunction<W>),
+                                ECC_BATCH_SIZE_NEON,
+                            ),
+                        }
+                    } else {
+                        eprintln!(
+                            "Warning: NEON requested but not available, falling back to scalar"
+                        );
+                        (None, 1)
+                    }
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    eprintln!(
+                        "Warning: NEON detection not available in no_std, falling back to scalar"
+                    );
+                    (None, 1)
+                }
+            }
+        }
+    }
+
+    /// Create a new ECCWriter with the specified error correction level and SIMD override.
+    pub fn new(inner: W, error_correction: ErrorCorrection, simd_override: SimdOverride) -> Self {
+        let (encode_fn_simd, simd_batch_size) =
+            Self::apply_simd_override(error_correction, simd_override);
 
         let (encode_fn, uses_buffer, codeword_data_len) = match error_correction {
             ErrorCorrection::None => (encode_none as EncodeFunction<W>, false, 0),
@@ -273,12 +367,12 @@ impl<W: Write> ECCEncoder<W> {
     }
 
     #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f,gfni")]
-    unsafe fn encode_batch_avx512<const DATA_LEN: usize, const PARITY_LEN: usize>(
+    #[target_feature(enable = "avx2,gfni")]
+    unsafe fn encode_batch_avx2_gfni<const DATA_LEN: usize, const PARITY_LEN: usize>(
         &mut self,
         data: &[u8],
     ) -> Result<usize> {
-        const BATCH: usize = 64;
+        const BATCH: usize = 32;
         let batch_data_size = BATCH * DATA_LEN;
         let mut input_processed = 0;
 
@@ -290,7 +384,7 @@ impl<W: Write> ECCEncoder<W> {
                 .fill_batch_from_buffer::<BATCH, DATA_LEN>(&mut batch_codewords, batch_data_size)
             {
                 unsafe {
-                    encode_simd_batch_avx512::<_, BATCH, DATA_LEN, PARITY_LEN>(
+                    encode_simd_batch_avx2_gfni::<_, BATCH, DATA_LEN, PARITY_LEN>(
                         &mut self.inner,
                         &batch_codewords,
                     )?;
@@ -305,7 +399,7 @@ impl<W: Write> ECCEncoder<W> {
         let (left, aligned, _right) = unsafe { data.align_to::<[u8; DATA_LEN]>() };
 
         if left.is_empty() && aligned.len() >= BATCH {
-            // Data is perfectly aligned and we have enough for at least one batch!
+            // Data is perfectly aligned, and we have enough for at least one batch!
             let batches_possible = aligned.len() / BATCH;
 
             for batch_idx in 0..batches_possible {
@@ -317,7 +411,7 @@ impl<W: Write> ECCEncoder<W> {
                     unsafe { &*(batch_slice.as_ptr() as *const [[u8; DATA_LEN]; BATCH]) };
 
                 unsafe {
-                    encode_simd_batch_avx512::<_, BATCH, DATA_LEN, PARITY_LEN>(
+                    encode_simd_batch_avx2_gfni::<_, BATCH, DATA_LEN, PARITY_LEN>(
                         &mut self.inner,
                         batch_codewords,
                     )?;
@@ -341,7 +435,7 @@ impl<W: Write> ECCEncoder<W> {
             }
 
             unsafe {
-                encode_simd_batch_avx512::<_, BATCH, DATA_LEN, PARITY_LEN>(
+                encode_simd_batch_avx2_gfni::<_, BATCH, DATA_LEN, PARITY_LEN>(
                     &mut self.inner,
                     &batch_codewords,
                 )?;
@@ -355,7 +449,7 @@ impl<W: Write> ECCEncoder<W> {
     }
 
     #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2,gfni")]
+    #[target_feature(enable = "avx2")]
     unsafe fn encode_batch_avx2<const DATA_LEN: usize, const PARITY_LEN: usize>(
         &mut self,
         data: &[u8],
@@ -387,7 +481,7 @@ impl<W: Write> ECCEncoder<W> {
         let (left, aligned, _right) = unsafe { data.align_to::<[u8; DATA_LEN]>() };
 
         if left.is_empty() && aligned.len() >= BATCH {
-            // Data is perfectly aligned and we have enough for at least one batch!
+            // Data is perfectly aligned, and we have enough for at least one batch!
             let batches_possible = aligned.len() / BATCH;
 
             for batch_idx in 0..batches_possible {
@@ -469,7 +563,7 @@ impl<W: Write> ECCEncoder<W> {
         let (left, aligned, _right) = unsafe { data.align_to::<[u8; DATA_LEN]>() };
 
         if left.is_empty() && aligned.len() >= BATCH {
-            // Data is perfectly aligned and we have enough for at least one batch!
+            // Data is perfectly aligned, and we have enough for at least one batch!
             let batches_possible = aligned.len() / BATCH;
 
             for batch_idx in 0..batches_possible {
@@ -585,67 +679,8 @@ impl<W: Write> Write for ECCEncoder<W> {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f,gfni")]
-unsafe fn encode_simd_batch_avx512<
-    R: Write,
-    const BATCH: usize,
-    const DATA_LEN: usize,
-    const PARITY_LEN: usize,
->(
-    mut writer: R,
-    batch_codewords: &[[u8; DATA_LEN]; BATCH],
-) -> Result<()> {
-    use core::arch::x86_64::*;
-
-    let transposed_data = crate::transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
-    let gen_poly = get_generator_poly::<PARITY_LEN>();
-
-    // LFSR-based encoding with SIMD.
-    let mut remainder = [[0u8; BATCH]; PARITY_LEN];
-
-    // Process each data byte position (from highest to lowest).
-    for data_bytes in transposed_data.iter().rev() {
-        let data_vec = unsafe { _mm512_loadu_si512(data_bytes.as_ptr() as *const __m512i) };
-
-        // XOR with feedback from the highest remainder position.
-        let feedback_vec =
-            unsafe { _mm512_loadu_si512(remainder[PARITY_LEN - 1].as_ptr() as *const __m512i) };
-        let feedback = _mm512_xor_si512(data_vec, feedback_vec);
-
-        // Shift remainder right.
-        for i in (1..PARITY_LEN).rev() {
-            remainder[i] = remainder[i - 1];
-        }
-        remainder[0] = [0u8; BATCH];
-
-        // Apply generator polynomial multiplication with GFNI.
-        for (i, &g_coeff) in gen_poly[..PARITY_LEN].iter().enumerate() {
-            if g_coeff != 0 {
-                let g_vec = _mm512_set1_epi8(g_coeff as i8);
-                let product = _mm512_gf2p8mul_epi8(feedback, g_vec);
-
-                let current =
-                    unsafe { _mm512_loadu_si512(remainder[i].as_ptr() as *const __m512i) };
-                let result = _mm512_xor_si512(current, product);
-                unsafe { _mm512_storeu_si512(remainder[i].as_mut_ptr() as *mut __m512i, result) };
-            }
-        }
-    }
-
-    let (data_codewords, parity_codewords) =
-        crate::transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
-
-    for i in 0..BATCH {
-        writer.write_all(&data_codewords[i])?;
-        writer.write_all(&parity_codewords[i])?;
-    }
-
-    Ok(())
-}
-
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,gfni")]
-unsafe fn encode_simd_batch_avx2<
+unsafe fn encode_simd_batch_avx2_gfni<
     R: Write,
     const BATCH: usize,
     const DATA_LEN: usize,
@@ -700,6 +735,110 @@ unsafe fn encode_simd_batch_avx2<
     }
 
     Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn encode_simd_batch_avx2<
+    R: Write,
+    const BATCH: usize,
+    const DATA_LEN: usize,
+    const PARITY_LEN: usize,
+>(
+    mut writer: R,
+    batch_codewords: &[[u8; DATA_LEN]; BATCH],
+) -> Result<()> {
+    use core::arch::x86_64::*;
+
+    use crate::reed_solomon::simd::{RS_255_191_TABLES, RS_255_223_TABLES, RS_255_239_TABLES};
+
+    // Define a macro to reduce repetition in applying tables.
+    macro_rules! apply_tables_for_parity {
+        ($parity:expr, $tables:expr, $table_len:expr, $feedback:expr, $remainder:expr) => {
+            for i in 0..$parity {
+                if i < $table_len {
+                    let table = &$tables[0][i];
+                    unsafe {
+                        apply_avx2_gf_multiplication::<BATCH>($feedback, &mut $remainder[i], table);
+                    }
+                }
+            }
+        };
+    }
+
+    let transposed_data = crate::transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
+
+    // LFSR-based encoding with SIMD and lookup tables.
+    let mut remainder = [[0u8; BATCH]; PARITY_LEN];
+
+    // Process each data byte position (from highest to lowest).
+    for data_bytes in transposed_data.iter().rev() {
+        let data_vec = unsafe { _mm256_loadu_si256(data_bytes.as_ptr() as *const __m256i) };
+
+        // XOR with feedback from the highest remainder position.
+        let feedback_vec =
+            unsafe { _mm256_loadu_si256(remainder[PARITY_LEN - 1].as_ptr() as *const __m256i) };
+        let feedback = _mm256_xor_si256(data_vec, feedback_vec);
+
+        // Shift remainder right.
+        for i in (1..PARITY_LEN).rev() {
+            remainder[i] = remainder[i - 1];
+        }
+        remainder[0] = [0u8; BATCH];
+
+        // Apply generator polynomial multiplication using lookup tables.
+        match PARITY_LEN {
+            16 => apply_tables_for_parity!(PARITY_LEN, RS_255_239_TABLES, 17, &feedback, remainder),
+            32 => apply_tables_for_parity!(PARITY_LEN, RS_255_223_TABLES, 33, &feedback, remainder),
+            64 => apply_tables_for_parity!(PARITY_LEN, RS_255_191_TABLES, 65, &feedback, remainder),
+            _ => unreachable!(),
+        }
+    }
+
+    let (data_codewords, parity_codewords) =
+        crate::transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
+
+    for i in 0..BATCH {
+        writer.write_all(&data_codewords[i])?;
+        writer.write_all(&parity_codewords[i])?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn apply_avx2_gf_multiplication<const BATCH: usize>(
+    feedback: &core::arch::x86_64::__m256i,
+    remainder_row: &mut [u8; BATCH],
+    table: &crate::reed_solomon::simd::GfFourBitTables,
+) {
+    use core::arch::x86_64::*;
+
+    // Extract low and high nibbles from feedback vector.
+    let low_nibble_mask = _mm256_set1_epi8(0x0F_u8 as i8);
+    let low_nibbles = _mm256_and_si256(*feedback, low_nibble_mask);
+    let high_nibbles = _mm256_srli_epi16::<4>(*feedback);
+    let high_nibbles = _mm256_and_si256(high_nibbles, low_nibble_mask);
+
+    // Perform table lookups for low nibbles.
+    // Note: We need to duplicate the 16-byte table to fill the 32-byte AVX2 register.
+    let low_table_128 = unsafe { _mm_loadu_si128(table.low_four.as_ptr() as *const __m128i) };
+    let low_table = _mm256_broadcastsi128_si256(low_table_128);
+    let low_products = _mm256_shuffle_epi8(low_table, low_nibbles);
+
+    // Perform table lookups for high nibbles.
+    let high_table_128 = unsafe { _mm_loadu_si128(table.high_four.as_ptr() as *const __m128i) };
+    let high_table = _mm256_broadcastsi128_si256(high_table_128);
+    let high_products = _mm256_shuffle_epi8(high_table, high_nibbles);
+
+    // Combine low and high products.
+    let products = _mm256_xor_si256(low_products, high_products);
+
+    // XOR with current remainder.
+    let current = unsafe { _mm256_loadu_si256(remainder_row.as_ptr() as *const __m256i) };
+    let result = _mm256_xor_si256(current, products);
+    unsafe { _mm256_storeu_si256(remainder_row.as_mut_ptr() as *mut __m256i, result) };
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -806,16 +945,12 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "std")))]
-    use crate::{
-        reed_solomon::{code_255_191, code_255_223, code_255_239},
-        tests::Lcg,
-    };
 
     #[test]
     fn test_ec_encoder_none_passthrough() {
         let mut output = Vec::new();
-        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::None);
+        let mut ec_encoder =
+            ECCEncoder::new(&mut output, ErrorCorrection::None, SimdOverride::Auto);
 
         let test_data = b"Hello, World!";
         ec_encoder.write_all(test_data).unwrap();
@@ -828,7 +963,8 @@ mod tests {
     #[test]
     fn test_ec_encoder_standard_encoding() {
         let mut output = Vec::new();
-        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Standard);
+        let mut ec_encoder =
+            ECCEncoder::new(&mut output, ErrorCorrection::Standard, SimdOverride::Auto);
 
         let test_data = b"Hello, Reed-Solomon encoding!";
         ec_encoder.write_all(test_data).unwrap();
@@ -849,7 +985,8 @@ mod tests {
     #[test]
     fn test_ec_encoder_multiple_codewords() {
         let mut output = Vec::new();
-        let mut ec_encoder = ECCEncoder::new(&mut output, ErrorCorrection::Standard);
+        let mut ec_encoder =
+            ECCEncoder::new(&mut output, ErrorCorrection::Standard, SimdOverride::Auto);
 
         let mut test_data = Vec::new();
         test_data.extend_from_slice(b"A".repeat(300).as_slice());
@@ -878,149 +1015,102 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_direct_simd_vs_scalar_functions() {
-        if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("gfni") {
-            println!("GFNI not supported");
-            return;
-        }
-        println!("GFNI supported");
-
-        fn test_simd_batch<const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
-            rng: &mut Lcg,
-            encode_fn: fn(&[u8; DATA_LEN]) -> [u8; PARITY_LEN],
-            simd_fn: impl FnOnce(&mut Vec<u8>, &[[u8; DATA_LEN]; BATCH]) -> Result<()>,
+    fn test_all_simd_paths_on_current_arch() {
+        fn test_simd_path_consistency(
+            error_correction: ErrorCorrection,
+            simd_override: SimdOverride,
             test_name: &str,
-        ) {
-            let mut batch_data = [[0u8; DATA_LEN]; BATCH];
-            for codeword in &mut batch_data {
-                rng.fill_buffer(codeword);
-            }
+        ) -> bool {
+            let test_data =
+                b"Hello, World! This is a test of SIMD consistency across all paths.".repeat(20);
 
             let mut scalar_output = Vec::new();
+            let mut scalar_encoder = ECCEncoder::new(
+                &mut scalar_output,
+                error_correction,
+                SimdOverride::ForceScalar,
+            );
+            scalar_encoder.write_all(&test_data).unwrap();
+            scalar_encoder.finish().unwrap();
+
             let mut simd_output = Vec::new();
+            let mut simd_encoder =
+                ECCEncoder::new(&mut simd_output, error_correction, simd_override);
+            simd_encoder.write_all(&test_data).unwrap();
+            simd_encoder.finish().unwrap();
 
-            for codeword in &batch_data {
-                let parity = encode_fn(codeword);
-                scalar_output.extend_from_slice(codeword);
-                scalar_output.extend_from_slice(&parity);
+            let matches = scalar_output == simd_output;
+            if matches {
+                println!("✓ {test_name} - outputs match");
+            } else {
+                println!("✗ {test_name} - outputs differ!");
+                println!("  Scalar output length: {}", scalar_output.len());
+                println!("  SIMD output length: {}", simd_output.len());
+                println!("  Scalar hash: {}", blake3::hash(&scalar_output));
+                println!("  SIMD hash: {}", blake3::hash(&simd_output));
+            }
+            matches
+        }
+
+        let error_corrections = [
+            ErrorCorrection::Standard,
+            ErrorCorrection::Paranoid,
+            ErrorCorrection::Extreme,
+        ];
+
+        let mut all_passed = true;
+
+        for &ec in &error_corrections {
+            let ec_name = match ec {
+                ErrorCorrection::None => "None",
+                ErrorCorrection::Standard => "Standard",
+                ErrorCorrection::Paranoid => "Paranoid",
+                ErrorCorrection::Extreme => "Extreme",
+            };
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                if is_x86_feature_detected!("avx2") {
+                    let test_name = format!("AVX2 (pure) vs Scalar - {ec_name}");
+                    all_passed &=
+                        test_simd_path_consistency(ec, SimdOverride::ForceAvx2, &test_name);
+                } else {
+                    println!("⊗ AVX2 not available on this CPU - {ec_name}");
+                }
+
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                    let test_name = format!("AVX2 + GFNI vs Scalar - {ec_name}");
+                    all_passed &=
+                        test_simd_path_consistency(ec, SimdOverride::ForceAvx2Gfni, &test_name);
+                } else {
+                    println!("⊗ AVX2 + GFNI not available on this CPU - {ec_name}");
+                }
             }
 
-            simd_fn(&mut simd_output, &batch_data).unwrap();
-
-            assert_eq!(
-                blake3::hash(&scalar_output),
-                blake3::hash(&simd_output),
-                "{test_name}"
-            );
-        }
-
-        let mut rng = Lcg::new(0x123456789ABCDEF0);
-
-        test_simd_batch::<32, 239, 16>(
-            &mut rng,
-            code_255_239::encode,
-            |out, data| unsafe { encode_simd_batch_avx2::<_, 32, 239, 16>(out, data) },
-            "Direct AVX2 vs scalar mismatch for Standard error correction",
-        );
-
-        test_simd_batch::<32, 223, 32>(
-            &mut rng,
-            code_255_223::encode,
-            |out, data| unsafe { encode_simd_batch_avx2::<_, 32, 223, 32>(out, data) },
-            "Direct AVX2 vs scalar mismatch for Paranoid error correction",
-        );
-
-        test_simd_batch::<32, 191, 64>(
-            &mut rng,
-            code_255_191::encode,
-            |out, data| unsafe { encode_simd_batch_avx2::<_, 32, 191, 64>(out, data) },
-            "Direct AVX2 vs scalar mismatch for Extreme error correction",
-        );
-
-        if is_x86_feature_detected!("avx512f") {
-            test_simd_batch::<64, 239, 16>(
-                &mut rng,
-                code_255_239::encode,
-                |out, data| unsafe { encode_simd_batch_avx512::<_, 64, 239, 16>(out, data) },
-                "Direct AVX512 vs scalar mismatch for Standard error correction",
-            );
-
-            test_simd_batch::<64, 223, 32>(
-                &mut rng,
-                code_255_223::encode,
-                |out, data| unsafe { encode_simd_batch_avx512::<_, 64, 223, 32>(out, data) },
-                "Direct AVX512 vs scalar mismatch for Paranoid error correction",
-            );
-
-            test_simd_batch::<64, 191, 64>(
-                &mut rng,
-                code_255_191::encode,
-                |out, data| unsafe { encode_simd_batch_avx512::<_, 64, 191, 64>(out, data) },
-                "Direct AVX512 vs scalar mismatch for Extreme error correction",
-            );
-        }
-    }
-
-    #[test]
-    #[cfg(all(target_arch = "aarch64", feature = "std"))]
-    fn test_direct_simd_vs_scalar_functions_neon() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
-            println!("NEON not supported");
-            return;
-        }
-        println!("NEON supported");
-
-        fn test_simd_batch<const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
-            rng: &mut Lcg,
-            encode_fn: fn(&[u8; DATA_LEN]) -> [u8; PARITY_LEN],
-            simd_fn: impl FnOnce(&mut Vec<u8>, &[[u8; DATA_LEN]; BATCH]) -> Result<()>,
-            test_name: &str,
-        ) {
-            let mut batch_data = [[0u8; DATA_LEN]; BATCH];
-            for codeword in &mut batch_data {
-                rng.fill_buffer(codeword);
+            #[cfg(all(target_arch = "aarch64", feature = "std"))]
+            {
+                // Test NEON if available
+                if std::arch::is_aarch64_feature_detected!("neon") {
+                    let test_name = format!("NEON vs Scalar - {ec_name}");
+                    all_passed &=
+                        test_simd_path_consistency(ec, SimdOverride::ForceNeon, &test_name);
+                } else {
+                    println!("⊗ NEON not available on this CPU - {ec_name}");
+                }
             }
 
-            let mut scalar_output = Vec::new();
-            let mut simd_output = Vec::new();
-
-            for codeword in &batch_data {
-                let parity = encode_fn(codeword);
-                scalar_output.extend_from_slice(codeword);
-                scalar_output.extend_from_slice(&parity);
+            #[cfg(not(any(
+                target_arch = "x86_64",
+                all(target_arch = "aarch64", feature = "std")
+            )))]
+            {
+                println!("⊗ No SIMD paths available on this architecture - {ec_name}");
             }
-
-            simd_fn(&mut simd_output, &batch_data).unwrap();
-
-            assert_eq!(
-                blake3::hash(&scalar_output),
-                blake3::hash(&simd_output),
-                "{test_name}"
-            );
         }
 
-        let mut rng = Lcg::new(0x123456789ABCDEF0);
-
-        test_simd_batch::<16, 239, 16>(
-            &mut rng,
-            code_255_239::encode,
-            |out, data| unsafe { encode_simd_batch_neon::<_, 16, 239, 16>(out, data) },
-            "Direct NEON vs scalar mismatch for Standard error correction",
-        );
-
-        test_simd_batch::<16, 223, 32>(
-            &mut rng,
-            code_255_223::encode,
-            |out, data| unsafe { encode_simd_batch_neon::<_, 16, 223, 32>(out, data) },
-            "Direct NEON vs scalar mismatch for Paranoid error correction",
-        );
-
-        test_simd_batch::<16, 191, 64>(
-            &mut rng,
-            code_255_191::encode,
-            |out, data| unsafe { encode_simd_batch_neon::<_, 16, 191, 64>(out, data) },
-            "Direct NEON vs scalar mismatch for Extreme error correction",
+        assert!(
+            all_passed,
+            "One or more SIMD paths produced different outputs than scalar reference"
         );
     }
 }
