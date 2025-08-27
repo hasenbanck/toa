@@ -1595,27 +1595,27 @@ pub mod simd {
         #[test]
         fn test_generator_polynomial_compatibility() {
             assert_eq!(RS_255_239_GENERATOR.len(), 17);
-            for i in 0..17 {
+            for (i, &generator_val) in RS_255_239_GENERATOR.iter().enumerate() {
                 assert_eq!(
-                    RS_255_239_GENERATOR[i],
+                    generator_val,
                     code_255_239::GEN_POLY[i],
                     "RS(255,239) generator mismatch at index {i}"
                 );
             }
 
             assert_eq!(RS_255_223_GENERATOR.len(), 33);
-            for i in 0..33 {
+            for (i, &generator_val) in RS_255_223_GENERATOR.iter().enumerate() {
                 assert_eq!(
-                    RS_255_223_GENERATOR[i],
+                    generator_val,
                     code_255_223::GEN_POLY[i],
                     "RS(255,223) generator mismatch at index {i}"
                 );
             }
 
             assert_eq!(RS_255_191_GENERATOR.len(), 65);
-            for i in 0..65 {
+            for (i, &generator_val) in RS_255_191_GENERATOR.iter().enumerate() {
                 assert_eq!(
-                    RS_255_191_GENERATOR[i],
+                    generator_val,
                     code_255_191::GEN_POLY[i],
                     "RS(255,191) generator mismatch at index {i}"
                 );
@@ -1698,14 +1698,12 @@ pub mod simd {
 
         #[test]
         fn test_syndrome_table_values() {
-            for power in 0..=255 {
+            for (power, tables) in RS_255_SYNDROME_TABLES.iter().enumerate() {
                 let alpha_value = if power == 0 {
                     1 // α^0 = 1
                 } else {
                     primitives::gf_alpha_pow(power as isize)
                 };
-
-                let tables = &RS_255_SYNDROME_TABLES[power];
 
                 for test_byte in [0x00, 0x01, 0x02, 0x0F, 0x10, 0xF0, 0xFF] {
                     let low_nibble = test_byte & 0x0F;

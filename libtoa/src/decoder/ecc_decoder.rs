@@ -312,7 +312,9 @@ unsafe fn decode_simd_batch_avx2_gfni<
     let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
 
     // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
-    for syndrome_idx in 0..PARITY_LEN {
+    for (syndrome_idx, syndrome_slot) in
+        syndromes_transposed.iter_mut().enumerate().take(PARITY_LEN)
+    {
         let mut syndrome_vec = _mm256_setzero_si256();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
@@ -331,7 +333,7 @@ unsafe fn decode_simd_batch_avx2_gfni<
             syndrome_vec = _mm256_xor_si256(syndrome_vec, product);
         }
 
-        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m256i;
+        let syndrome_ptr = syndrome_slot.as_mut_ptr() as *mut __m256i;
         unsafe { _mm256_storeu_si256(syndrome_ptr, syndrome_vec) };
     }
 
@@ -384,7 +386,9 @@ unsafe fn decode_simd_batch_avx2<
     let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
 
     // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
-    for syndrome_idx in 0..PARITY_LEN {
+    for (syndrome_idx, syndrome_slot) in
+        syndromes_transposed.iter_mut().enumerate().take(PARITY_LEN)
+    {
         let mut syndrome_vec = _mm256_setzero_si256();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
@@ -401,7 +405,7 @@ unsafe fn decode_simd_batch_avx2<
             syndrome_vec = _mm256_xor_si256(syndrome_vec, multiplied);
         }
 
-        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m256i;
+        let syndrome_ptr = syndrome_slot.as_mut_ptr() as *mut __m256i;
         unsafe { _mm256_storeu_si256(syndrome_ptr, syndrome_vec) };
     }
 
@@ -488,7 +492,9 @@ unsafe fn decode_simd_batch_ssse3<
     let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
 
     // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
-    for syndrome_idx in 0..PARITY_LEN {
+    for (syndrome_idx, syndrome_slot) in
+        syndromes_transposed.iter_mut().enumerate().take(PARITY_LEN)
+    {
         let mut syndrome_vec = _mm_setzero_si128();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
@@ -505,7 +511,7 @@ unsafe fn decode_simd_batch_ssse3<
             syndrome_vec = _mm_xor_si128(syndrome_vec, multiplied);
         }
 
-        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m128i;
+        let syndrome_ptr = syndrome_slot.as_mut_ptr() as *mut __m128i;
         unsafe { _mm_storeu_si128(syndrome_ptr, syndrome_vec) };
     }
 
@@ -558,7 +564,9 @@ unsafe fn decode_simd_batch_sse2_gfni<
     let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
 
     // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
-    for syndrome_idx in 0..PARITY_LEN {
+    for (syndrome_idx, syndrome_slot) in
+        syndromes_transposed.iter_mut().enumerate().take(PARITY_LEN)
+    {
         let mut syndrome_vec = _mm_setzero_si128();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
@@ -577,7 +585,7 @@ unsafe fn decode_simd_batch_sse2_gfni<
             syndrome_vec = _mm_xor_si128(syndrome_vec, multiplied);
         }
 
-        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m128i;
+        let syndrome_ptr = syndrome_slot.as_mut_ptr() as *mut __m128i;
         unsafe { _mm_storeu_si128(syndrome_ptr, syndrome_vec) };
     }
 
@@ -662,7 +670,9 @@ unsafe fn decode_simd_batch_neon<
     let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
 
     // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
-    for syndrome_idx in 0..PARITY_LEN {
+    for (syndrome_idx, syndrome_slot) in
+        syndromes_transposed.iter_mut().enumerate().take(PARITY_LEN)
+    {
         let mut syndrome_vec = vdupq_n_u8(0);
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
@@ -677,12 +687,7 @@ unsafe fn decode_simd_batch_neon<
             syndrome_vec = veorq_u8(syndrome_vec, multiplied);
         }
 
-        unsafe {
-            vst1q_u8(
-                syndromes_transposed[syndrome_idx].as_mut_ptr(),
-                syndrome_vec,
-            );
-        }
+        unsafe { vst1q_u8(syndrome_slot.as_mut_ptr(), syndrome_vec) };
     }
 
     process_codewords::<BATCH, DATA_LEN, PARITY_LEN>(
