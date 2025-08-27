@@ -22,6 +22,7 @@ struct Cli {
     list: bool,
     test: bool,
     keep: bool,
+    verify: bool,
     verbose: bool,
     preset: u32,
     block_size: Option<u8>,
@@ -89,6 +90,12 @@ impl Cli {
                     .help("Show detailed output during operations")
                     .short('v')
                     .long("verbose")
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("verify")
+                    .help("Test decompression after compression to ensure data integrity (original file only deleted if verification passes)")
+                    .long("verify")
                     .action(clap::ArgAction::SetTrue),
             )
             .arg(
@@ -324,6 +331,7 @@ impl Cli {
             list: matches.get_flag("list"),
             test: matches.get_flag("test"),
             keep: matches.get_flag("keep"),
+            verify: matches.get_flag("verify"),
             verbose: matches.get_flag("verbose"),
             preset,
             block_size: matches.get_one::<u8>("block-size").copied(),
@@ -408,13 +416,14 @@ fn main() -> Result<()> {
 
     if cli.list {
         // List mode - show metadata.
-        if let Err(error) = list_file_info(&cli) {
+        if let Err(error) = list_file_info(&cli.input) {
             eprintln!("Error: Can't list file content: {error}");
             process::exit(1);
         }
     } else if cli.test {
         // Test mode - decompress without storing output.
-        let (compressed_size, uncompressed_size, elapsed) = match test_file(&cli) {
+        let (compressed_size, uncompressed_size, elapsed) = match test_file(&cli.input, cli.threads)
+        {
             Ok(result) => result,
             Err(error) => {
                 eprintln!("Error: Can't test file: {error}");
@@ -455,7 +464,7 @@ fn main() -> Result<()> {
         });
 
         let (compressed_size, uncompressed_size, elapsed) =
-            match decompress_file(&cli, &output_filename) {
+            match decompress_file(&cli.input, &output_filename, cli.threads) {
                 Ok(result) => result,
                 Err(error) => {
                     eprintln!("Error: Can't decompress file: {error}");
@@ -504,6 +513,24 @@ fn main() -> Result<()> {
                     process::exit(1);
                 }
             };
+
+        if cli.verify {
+            if cli.verbose {
+                println!("Verifying compressed file...");
+            }
+
+            if let Err(error) = test_file(&output_filename, cli.threads) {
+                eprintln!("Error: Verification failed - compressed file is corrupt: {error}");
+                if let Err(remove_error) = fs::remove_file(&output_filename) {
+                    eprintln!("Warning: Failed to remove corrupt compressed file: {remove_error}");
+                }
+                process::exit(1);
+            }
+
+            if cli.verbose {
+                println!("Verification successful");
+            }
+        }
 
         if cli.verbose {
             let speed_mibs = if elapsed.as_secs_f64() > 0.0 {

@@ -2,16 +2,16 @@ use std::{fs, fs::File, io::Write, time::Instant};
 
 use libtoa::{TOAFileDecoder, copy_wide};
 
-use crate::Cli;
-
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn decompress_file(
-    cli: &Cli,
+    input_path: &str,
     output_path: &str,
+    threads: usize,
 ) -> std::io::Result<(u64, u64, std::time::Duration)> {
-    let compressed_size = fs::metadata(&cli.input)?.len();
+    let compressed_size = fs::metadata(input_path)?.len();
     let mut output_file = File::create(output_path)?;
 
-    let mut toa_decoder = TOAFileDecoder::new(&cli.input, cli.threads, true)?;
+    let mut toa_decoder = TOAFileDecoder::new(input_path, threads, true)?;
 
     let start_time = Instant::now();
 
@@ -22,10 +22,14 @@ pub(crate) fn decompress_file(
     Ok((compressed_size, decompressed_size, elapsed))
 }
 
-pub(crate) fn test_file(cli: &Cli) -> std::io::Result<(u64, u64, std::time::Duration)> {
-    let compressed_size = fs::metadata(&cli.input)?.len();
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn test_file(
+    input_path: &str,
+    threads: usize,
+) -> std::io::Result<(u64, u64, std::time::Duration)> {
+    let compressed_size = fs::metadata(input_path)?.len();
 
-    let mut toa_decoder = TOAFileDecoder::new(&cli.input, cli.threads, true)?;
+    let mut toa_decoder = TOAFileDecoder::new(input_path, threads, true)?;
 
     let start_time = Instant::now();
 

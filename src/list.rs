@@ -2,14 +2,14 @@ use std::fs::File;
 
 use libtoa::{Prefilter, TOAMetadata};
 
-use crate::{Cli, util::format_size};
+use crate::util::format_size;
 
-pub(crate) fn list_file_info(cli: &Cli) -> std::io::Result<()> {
-    let input_file = File::open(&cli.input)?;
+pub(crate) fn list_file_info(input_path: &str) -> std::io::Result<()> {
+    let input_file = File::open(input_path)?;
     let compressed_size = input_file.metadata()?.len();
     let metadata = TOAMetadata::parse(input_file)?;
 
-    println!("Archive: {}", cli.input);
+    println!("Archive: {input_path}");
     println!("  Format version: 1");
     println!("  Prefilter: {}", format_prefilter(&metadata.prefilter));
     println!("  LZMA properties:");

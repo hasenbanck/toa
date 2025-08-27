@@ -158,6 +158,19 @@ toa --lc 3 --lp 0 --pb 2 --dict-size 26 input.txt
 toa -o compressed.toa input.txt
 ```
 
+### Compression Verification
+
+```bash
+# Compress with verification to ensure data integrity
+toa --verify important-data.txt
+
+# Combine with keep flag for extra safety
+toa --verify --keep backup.tar
+
+# Verify with verbose output
+toa --verify --verbose database.sql
+```
+
 ## When to Use TOA
 
 ### Perfect for:
