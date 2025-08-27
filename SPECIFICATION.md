@@ -1,6 +1,6 @@
 # TOA File Format Specification
 
-Version 0.9
+Version 0.10
 
 ## 1. Introduction
 
@@ -307,58 +307,75 @@ The compressed data MUST be an LZMA2s stream. LZMA2s is a simplified variant of 
 
 ##### 4.1.3.1 LZMA2s Stream Format
 
-An LZMA2s stream consists of a sequence of chunks, each beginning with a control byte that determines the chunk type and
-size. The stream MUST end with a control byte value of 0x00.
+An LZMA2s stream MUST consist of a sequence of chunks, each beginning with a control byte that determines the chunk type
+and size. The stream MUST terminate with a control byte value of 0x00. Implementations MUST NOT process streams that
+lack proper termination. Each chunk MUST be processed sequentially, and implementations MUST reject malformed chunk
+sequences.
 
 ##### 4.1.3.2 Control Byte Encoding
 
-The control byte uses the following encoding:
+The control byte MUST use the following encoding schemes. Implementations MUST reject control bytes that do not conform
+to these patterns:
 
 **End of Stream**: `0x00`
 
-- Indicates end of the LZMA2s stream
-- No additional bytes follow.
+- MUST indicate the end of the LZMA2s stream
+- MUST NOT be followed by any additional bytes
+- Implementations MUST terminate processing upon encountering this byte
 
 **Uncompressed Chunk**: `001sssss` + 2 bytes
 
-- Bits 7-5: `001` identifies uncompressed chunk
-- Bits 4-0: High 5 bits of 21-bit size
-- Following 2 bytes: Middle and low bytes of size
-- Actual size = encoded_size + 1
+- Bits 7-5: MUST be `001` to identify an uncompressed chunk
+- Bits 4-0: MUST contain the high 5 bits of the 21-bit size
+- The following 2 bytes MUST contain the middle and low bytes of size in big-endian order
+- Implementations MUST calculate the actual size as encoded_size + 1
+- The chunk data following these headers MUST be exactly the calculated size in bytes
 
 **Compressed Chunk**: `010uuuuu` + 4 bytes
 
-- Bits 7-5: `010` identifies compressed chunk
-- Bits 4-0: High 5 bits of 21-bit uncompressed size
-- Following 2 bytes: Middle and low bytes of uncompressed size
-- Following 2 bytes: 16-bit compressed size
-- Actual sizes = encoded_size + 1
+- Bits 7-5: MUST be `010` to identify a compressed chunk
+- Bits 4-0: MUST contain the high 5 bits of the 21-bit uncompressed size
+- The following 2 bytes MUST contain the middle and low bytes of uncompressed size
+- The following 2 bytes MUST contain the 16-bit compressed size in big-endian order
+- Implementations MUST calculate actual sizes as encoded_size + 1
+- The compressed data MUST decompress to exactly the specified uncompressed size
 
 **Delta Compressed Chunk**: `011uuuuu` + 3 bytes
 
-- Bits 7-5: `011` identifies delta compressed chunk
-- Bits 4-0: High 5 bits of 21-bit uncompressed size
-- Following 2 bytes: Middle and low bytes of uncompressed size
-- Following 1 byte: Delta from 65536
-- Compressed size = 65536 - delta
+- Bits 7-5: MUST be `011` to identify a delta compressed chunk
+- Bits 4-0: MUST contain the high 5 bits of the 21-bit uncompressed size
+- The following 2 bytes MUST contain the middle and low bytes of uncompressed size
+- The following 1 byte MUST contain the delta from 65536
+- Implementations MUST calculate compressed size as 65536 - delta
+- The delta value MUST NOT exceed 65536
 
 **Delta Uncompressed Chunk**: `1sdddddd` + 1 byte
 
-- Bit 7: `1` identifies delta uncompressed
-- Bit 6: Sign (0=add to 65536, 1=subtract from 65536)
-- Bits 5-0: High 6 bits of 14-bit delta
-- Following 1 byte: Low 8 bits of delta
-- Size = 65536 ± delta (range: 49,152 to 81,920 bytes)
+- Bit 7: MUST be `1` to identify delta uncompressed chunk
+- Bit 6: MUST be 0 to add to 65536, or 1 to subtract from 65536
+- Bits 5-0: MUST contain the high 6 bits of the 14-bit delta
+- The following 1 byte MUST contain the low 8 bits of delta
+- Implementations MUST calculate size as 65536 ± delta
+- The resulting size MUST be within the range 49,152 to 81,920 bytes inclusive
+
+Decoders MUST reject any control byte patterns not defined above. Encoders MUST NOT generate undefined control byte
+patterns.
+
+You're absolutely right. Let me correct that section:
 
 ##### 4.1.3.3 State Management
 
-LZMA2s maintains simpler state than LZMA2:
+LZMA2s implementations MUST maintain the following state constraints:
 
-- Properties (lc, lp, pb) remain constant throughout the stream
-- Dictionary size remains constant throughout the stream
-- The LZMA decoder state MUST be reset only when transitioning from an uncompressed chunk to a compressed chunk
+- Properties (lc, lp, pb) MUST remain constant throughout the entire stream
+- Dictionary size MUST remain constant throughout the entire stream
+- The LZMA decoder state MUST be reset when and only when transitioning from an uncompressed chunk to a compressed chunk
+- The LZMA decoder state MUST NOT be reset at any other time
+- Implementations MUST maintain dictionary contents across all chunks within the stream, regardless of chunk type
+- The dictionary MUST only be reset at block boundaries, never within an LZMA2s stream
 
-This simplified state management reduces implementation complexity while maintaining compression efficiency.
+Encoders MUST ensure that chunk transitions respect these state management rules. Decoders MUST verify state consistency
+and MUST reject streams that violate these constraints.
 
 ### 4.2 BLAKE3 Tree Integration
 
@@ -1044,6 +1061,7 @@ Files using this format SHOULD use the extension `.toa`.
 
 ## Revision History
 
+- Version 0.10 (2025-08-27): Change wording of the LZMA2s normative section
 - Version 0.9  (2025-08-22): Changes in the ECC:
     - Switched polynomial for Reed-Solomon ECC from 0x11D (x^8 + x^4 + x^3 + x^2 + 1) to
       0x11B (x^8 + x^4 + x^3 + x + 1) for better CPU instruction set support (like x86's GFNI)

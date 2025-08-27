@@ -19,7 +19,7 @@ against bit rot. It uses LZMA2s, a special variant of LZMA as it's compression a
 
 **TOA is still experimental, do NOT use it in production yet**
 
-**Note**: TOA format is currently at specification version 0.8 and not yet frozen. While the core features are stable,
+**Note**: TOA format is currently at specification version 0.10 and not yet frozen. While the core features are stable,
 the format may evolve before reaching version 1.0. The specification is thoroughly documented
 in [SPECIFICATION.md](SPECIFICATION.md).
 
