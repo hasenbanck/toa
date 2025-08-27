@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provide SIMD implementation for the ECC encoder and decoder. This resulted in a speed-up of 10-15x for the ECC
   encoding and validation when decoding.
 
+## Fixes
+
+- Fixed delta encoding bug of uncompressed chunks, where the direction was wrong on the encoder side (encoding "more"
+  with - instead of +).
+
 ## 0.2.0 - 2025-08-23
 
 ## Updates
