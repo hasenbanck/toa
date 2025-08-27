@@ -83,7 +83,7 @@ impl<W: Write> LZMA2sEncoder<W> {
     }
 
     fn write_uncompressed(&mut self, uncompressed_size: u32) -> crate::Result<()> {
-        let delta = (DELTA_UNCOMPRESSED_CENTER as i32) - (uncompressed_size as i32);
+        let delta = (uncompressed_size as i32) - (DELTA_UNCOMPRESSED_CENTER as i32);
 
         match delta.abs() <= 8191 {
             true => {
