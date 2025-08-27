@@ -13,10 +13,9 @@ rust-version = "1.89"
 
 [dependencies]
 blake3 = { workspace = true }
-hex = "0.4.3"
-
 [dev-dependencies]
 hex-literal = { workspace = true }
+criterion = { workspace = true }
 
 [features]
 default = ["std", "optimization"]
@@ -28,3 +27,7 @@ optimization = ["std"]
 [package.metadata.docs.rs]
 features = ["std", "optimization"]
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+name = "ecc"
+harness = false

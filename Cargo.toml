@@ -4,6 +4,7 @@ resolver = "2"
 
 [workspace.dependencies]
 clap = { version = "4", default-features = false, features = ["std", "help"] }
+criterion = "0.7"
 blake3 = { version = "1" }
 hex-literal = "1"
 
