@@ -6,13 +6,15 @@ const ECC_BATCH_SIZE_AVX2: usize = 32;
 #[cfg(target_arch = "x86_64")]
 const ECC_BATCH_SIZE_SSSE3: usize = 16;
 
+#[cfg(target_arch = "x86_64")]
+use crate::reed_solomon::primitives;
 #[cfg(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "std")))]
 use crate::reed_solomon::simd::RS_255_SYNDROME_TABLES;
 use crate::{
     ErrorCorrection, Read, Result, SimdOverride,
     circular_buffer::CircularBuffer,
     error_invalid_data,
-    reed_solomon::{code_255_191, code_255_223, code_255_239, primitives},
+    reed_solomon::{code_255_191, code_255_223, code_255_239},
 };
 
 type DecodeSingleFunction<R> = fn(&mut ECCDecoder<R>, &mut [u8], usize) -> Result<usize>;
@@ -262,21 +264,7 @@ unsafe fn decode_simd_batch_avx2_gfni<
 
     // Skip syndrome calculation entirely if validation is disabled.
     if !decoder.validate_rs {
-        let mut written = 0;
-
-        // Zero-copy path - direct access to aligned data.
-        for codeword_idx in 0..BATCH {
-            debug_assert!(written < buf.len());
-
-            let data_slice = &batch_array[codeword_idx][..DATA_LEN];
-            let write_len = buf[written..].len().min(data_slice.len());
-            buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-            written += write_len;
-
-            if write_len < data_slice.len() {
-                decoder.buffer.append(&data_slice[write_len..]);
-            }
-        }
+        let written = copy_codeword_data::<BATCH, DATA_LEN>(&mut decoder.buffer, buf, batch_array);
         return Ok(written);
     }
 
@@ -289,7 +277,8 @@ unsafe fn decode_simd_batch_avx2_gfni<
         let mut syndrome_vec = _mm256_setzero_si256();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
-            let data_vec = unsafe { _mm256_loadu_si256(byte_slice.as_ptr() as *const __m256i) };
+            let data_ptr = byte_slice.as_ptr() as *const __m256i;
+            let data_vec = unsafe { _mm256_loadu_si256(data_ptr) };
 
             // Calculate α^(syndrome_idx * byte_pos) for all positions.
             let power = ((syndrome_idx + 1) * byte_pos) % 255;
@@ -303,61 +292,17 @@ unsafe fn decode_simd_batch_avx2_gfni<
             syndrome_vec = _mm256_xor_si256(syndrome_vec, product);
         }
 
-        unsafe {
-            _mm256_storeu_si256(
-                syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m256i,
-                syndrome_vec,
-            );
-        }
+        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m256i;
+        unsafe { _mm256_storeu_si256(syndrome_ptr, syndrome_vec) };
     }
 
-    // Process each codeword based on its syndromes.
-    let mut written = 0;
-
-    for codeword_idx in 0..BATCH {
-        debug_assert!(written < buf.len());
-
-        // Check if this codeword has errors (any non-zero syndrome).
-        let has_errors = syndromes_transposed
-            .iter()
-            .any(|syndrome_row| syndrome_row[codeword_idx] != 0);
-
-        let data_slice = if has_errors && decoder.validate_rs {
-            // Copy to batch_codewords for error correction.
-            decoder.batch_codewords[codeword_idx] = batch_array[codeword_idx];
-
-            // Fall back to scalar Reed-Solomon correction
-            let decode_fn = match PARITY_LEN {
-                16 => code_255_239::decode,
-                32 => code_255_223::decode,
-                64 => code_255_191::decode,
-                _ => return Err(error_invalid_data("unsupported parity length")),
-            };
-
-            let corrected =
-                decode_fn(&mut decoder.batch_codewords[codeword_idx]).map_err(|_| {
-                    error_invalid_data("error correction couldn't correct a faulty block")
-                })?;
-
-            if corrected {
-                eprintln!("Error correction corrected a faulty block in SIMD batch");
-            }
-
-            // Use corrected data
-            &decoder.batch_codewords[codeword_idx][..DATA_LEN]
-        } else {
-            // Use zero-copy path for error-free codewords
-            &batch_array[codeword_idx][..DATA_LEN]
-        };
-
-        let write_len = buf[written..].len().min(data_slice.len());
-        buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-        written += write_len;
-
-        debug_assert!(write_len == data_slice.len());
-    }
-
-    Ok(written)
+    process_codewords::<BATCH, DATA_LEN, PARITY_LEN>(
+        decoder.validate_rs,
+        &mut decoder.batch_codewords,
+        buf,
+        batch_array,
+        &mut syndromes_transposed,
+    )
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -391,21 +336,7 @@ unsafe fn decode_simd_batch_avx2<
 
     // Skip syndrome calculation entirely if validation is disabled.
     if !decoder.validate_rs {
-        let mut written = 0;
-
-        // Zero-copy path - direct access to aligned data.
-        for codeword_idx in 0..BATCH {
-            debug_assert!(written < buf.len());
-
-            let data_slice = &batch_array[codeword_idx][..DATA_LEN];
-            let write_len = buf[written..].len().min(data_slice.len());
-            buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-            written += write_len;
-
-            if write_len < data_slice.len() {
-                decoder.buffer.append(&data_slice[write_len..]);
-            }
-        }
+        let written = copy_codeword_data::<BATCH, DATA_LEN>(&mut decoder.buffer, buf, batch_array);
         return Ok(written);
     }
 
@@ -418,7 +349,8 @@ unsafe fn decode_simd_batch_avx2<
         let mut syndrome_vec = _mm256_setzero_si256();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
-            let data_vec = unsafe { _mm256_loadu_si256(byte_slice.as_ptr() as *const __m256i) };
+            let data_ptr = byte_slice.as_ptr() as *const __m256i;
+            let data_vec = unsafe { _mm256_loadu_si256(data_ptr) };
 
             // Calculate α^(syndrome_idx * byte_pos) for all positions.
             let power = ((syndrome_idx + 1) * byte_pos) % 255;
@@ -430,61 +362,17 @@ unsafe fn decode_simd_batch_avx2<
             syndrome_vec = _mm256_xor_si256(syndrome_vec, multiplied);
         }
 
-        unsafe {
-            _mm256_storeu_si256(
-                syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m256i,
-                syndrome_vec,
-            );
-        }
+        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m256i;
+        unsafe { _mm256_storeu_si256(syndrome_ptr, syndrome_vec) };
     }
 
-    // Process each codeword based on its syndromes.
-    let mut written = 0;
-
-    for codeword_idx in 0..BATCH {
-        debug_assert!(written < buf.len());
-
-        // Check if this codeword has errors (any non-zero syndrome).
-        let has_errors = syndromes_transposed
-            .iter()
-            .any(|syndrome_row| syndrome_row[codeword_idx] != 0);
-
-        let data_slice = if has_errors && decoder.validate_rs {
-            // Copy to batch_codewords for error correction.
-            decoder.batch_codewords[codeword_idx] = batch_array[codeword_idx];
-
-            // Fall back to scalar Reed-Solomon correction.
-            let decode_fn = match PARITY_LEN {
-                16 => code_255_239::decode,
-                32 => code_255_223::decode,
-                64 => code_255_191::decode,
-                _ => return Err(error_invalid_data("unsupported parity length")),
-            };
-
-            let corrected =
-                decode_fn(&mut decoder.batch_codewords[codeword_idx]).map_err(|_| {
-                    error_invalid_data("error correction couldn't correct a faulty block")
-                })?;
-
-            if corrected {
-                eprintln!("Error correction corrected a faulty block in SIMD batch");
-            }
-
-            // Use corrected data
-            &decoder.batch_codewords[codeword_idx][..DATA_LEN]
-        } else {
-            // Use zero-copy path for error-free codewords
-            &batch_array[codeword_idx][..DATA_LEN]
-        };
-
-        let write_len = buf[written..].len().min(data_slice.len());
-        buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-        written += write_len;
-
-        debug_assert!(write_len == data_slice.len());
-    }
-
-    Ok(written)
+    process_codewords::<BATCH, DATA_LEN, PARITY_LEN>(
+        decoder.validate_rs,
+        &mut decoder.batch_codewords,
+        buf,
+        batch_array,
+        &mut syndromes_transposed,
+    )
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -506,12 +394,14 @@ unsafe fn apply_avx2_gf_multiplication(
 
     // Perform table lookups for low nibbles.
     // Note: We need to duplicate the 16-byte table to fill the 32-byte AVX2 register.
-    let low_table_128 = unsafe { _mm_loadu_si128(tables.low_four.as_ptr() as *const __m128i) };
+    let low_table_ptr = tables.low_four.as_ptr() as *const __m128i;
+    let low_table_128 = unsafe { _mm_loadu_si128(low_table_ptr) };
     let low_table = _mm256_broadcastsi128_si256(low_table_128);
     let low_products = _mm256_shuffle_epi8(low_table, low_nibbles);
 
     // Perform table lookups for high nibbles.
-    let high_table_128 = unsafe { _mm_loadu_si128(tables.high_four.as_ptr() as *const __m128i) };
+    let high_table_ptr = tables.high_four.as_ptr() as *const __m128i;
+    let high_table_128 = unsafe { _mm_loadu_si128(high_table_ptr) };
     let high_table = _mm256_broadcastsi128_si256(high_table_128);
     let high_products = _mm256_shuffle_epi8(high_table, high_nibbles);
 
@@ -550,21 +440,7 @@ unsafe fn decode_simd_batch_ssse3<
 
     // Skip syndrome calculation entirely if validation is disabled.
     if !decoder.validate_rs {
-        let mut written = 0;
-
-        // Zero-copy path - direct access to aligned data.
-        for codeword_idx in 0..BATCH {
-            debug_assert!(written < buf.len());
-
-            let data_slice = &batch_array[codeword_idx][..DATA_LEN];
-            let write_len = buf[written..].len().min(data_slice.len());
-            buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-            written += write_len;
-
-            if write_len < data_slice.len() {
-                decoder.buffer.append(&data_slice[write_len..]);
-            }
-        }
+        let written = copy_codeword_data::<BATCH, DATA_LEN>(&mut decoder.buffer, buf, batch_array);
         return Ok(written);
     }
 
@@ -577,7 +453,8 @@ unsafe fn decode_simd_batch_ssse3<
         let mut syndrome_vec = _mm_setzero_si128();
 
         for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
-            let data_vec = unsafe { _mm_loadu_si128(byte_slice.as_ptr() as *const __m128i) };
+            let data_ptr = byte_slice.as_ptr() as *const __m128i;
+            let data_vec = unsafe { _mm_loadu_si128(data_ptr) };
 
             // Calculate α^(syndrome_idx * byte_pos) for all positions.
             let power = ((syndrome_idx + 1) * byte_pos) % 255;
@@ -589,61 +466,17 @@ unsafe fn decode_simd_batch_ssse3<
             syndrome_vec = _mm_xor_si128(syndrome_vec, multiplied);
         }
 
-        unsafe {
-            _mm_storeu_si128(
-                syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m128i,
-                syndrome_vec,
-            );
-        }
+        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m128i;
+        unsafe { _mm_storeu_si128(syndrome_ptr, syndrome_vec) };
     }
 
-    // Process each codeword based on its syndromes.
-    let mut written = 0;
-
-    for codeword_idx in 0..BATCH {
-        debug_assert!(written < buf.len());
-
-        // Check if this codeword has errors (any non-zero syndrome).
-        let has_errors = syndromes_transposed
-            .iter()
-            .any(|syndrome_row| syndrome_row[codeword_idx] != 0);
-
-        let data_slice = if has_errors && decoder.validate_rs {
-            // Copy to batch_codewords for error correction.
-            decoder.batch_codewords[codeword_idx] = batch_array[codeword_idx];
-
-            // Fall back to scalar Reed-Solomon correction.
-            let decode_fn = match PARITY_LEN {
-                16 => code_255_239::decode,
-                32 => code_255_223::decode,
-                64 => code_255_191::decode,
-                _ => return Err(error_invalid_data("unsupported parity length")),
-            };
-
-            let corrected =
-                decode_fn(&mut decoder.batch_codewords[codeword_idx]).map_err(|_| {
-                    error_invalid_data("error correction couldn't correct a faulty block")
-                })?;
-
-            if corrected {
-                eprintln!("Error correction corrected a faulty block in SIMD batch");
-            }
-
-            // Use corrected data
-            &decoder.batch_codewords[codeword_idx][..DATA_LEN]
-        } else {
-            // Use zero-copy path for error-free codewords
-            &batch_array[codeword_idx][..DATA_LEN]
-        };
-
-        let write_len = buf[written..].len().min(data_slice.len());
-        buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-        written += write_len;
-
-        debug_assert!(write_len == data_slice.len());
-    }
-
-    Ok(written)
+    process_codewords::<BATCH, DATA_LEN, PARITY_LEN>(
+        decoder.validate_rs,
+        &mut decoder.batch_codewords,
+        buf,
+        batch_array,
+        &mut syndromes_transposed,
+    )
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -665,11 +498,13 @@ unsafe fn apply_ssse3_gf_multiplication(
 
     // Perform table lookups for low nibbles.
     // Note: For SSE, the table is already 16 bytes, perfect for __m128i.
-    let low_table = unsafe { _mm_loadu_si128(tables.low_four.as_ptr() as *const __m128i) };
+    let low_table_ptr = tables.low_four.as_ptr() as *const __m128i;
+    let low_table = unsafe { _mm_loadu_si128(low_table_ptr) };
     let low_products = _mm_shuffle_epi8(low_table, low_nibbles);
 
     // Perform table lookups for high nibbles.
-    let high_table = unsafe { _mm_loadu_si128(tables.high_four.as_ptr() as *const __m128i) };
+    let high_table_ptr = tables.high_four.as_ptr() as *const __m128i;
+    let high_table = unsafe { _mm_loadu_si128(high_table_ptr) };
     let high_products = _mm_shuffle_epi8(high_table, high_nibbles);
 
     // Combine low and high products.
@@ -707,21 +542,7 @@ unsafe fn decode_simd_batch_neon<
 
     // Skip syndrome calculation entirely if validation is disabled.
     if !decoder.validate_rs {
-        let mut written = 0;
-
-        // Zero-copy path - direct access to aligned data.
-        for codeword_idx in 0..BATCH {
-            debug_assert!(written < buf.len());
-
-            let data_slice = &batch_array[codeword_idx][..DATA_LEN];
-            let write_len = buf[written..].len().min(data_slice.len());
-            buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
-            written += write_len;
-
-            if write_len < data_slice.len() {
-                decoder.buffer.append(&data_slice[write_len..]);
-            }
-        }
+        let written = copy_codeword_data::<BATCH, DATA_LEN>(&mut decoder.buffer, buf, batch_array);
         return Ok(written);
     }
 
@@ -753,7 +574,46 @@ unsafe fn decode_simd_batch_neon<
         }
     }
 
-    // Process each codeword based on its syndromes.
+    process_codewords::<BATCH, DATA_LEN, PARITY_LEN>(
+        decoder.validate_rs,
+        &mut decoder.batch_codewords,
+        buf,
+        batch_array,
+        &mut syndromes_transposed,
+    )
+}
+
+fn copy_codeword_data<const BATCH: usize, const DATA_LEN: usize>(
+    buffer: &mut CircularBuffer,
+    buf: &mut [u8],
+    batch_array: &[[u8; 255]; BATCH],
+) -> usize {
+    let mut written = 0;
+
+    for codeword in batch_array.iter() {
+        debug_assert!(written < buf.len());
+
+        let data_slice = &codeword[..DATA_LEN];
+        let write_len = buf[written..].len().min(data_slice.len());
+        buf[written..written + write_len].copy_from_slice(&data_slice[..write_len]);
+        written += write_len;
+
+        if write_len < data_slice.len() {
+            buffer.append(&data_slice[write_len..]);
+        }
+    }
+
+    written
+}
+
+/// Process each codeword based on its syndromes.
+fn process_codewords<const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
+    validate_rs: bool,
+    batch_codewords: &mut [[u8; 255]],
+    buf: &mut [u8],
+    batch_array: &[[u8; 255]; BATCH],
+    syndromes_transposed: &mut [[u8; BATCH]; PARITY_LEN],
+) -> Result<usize> {
     let mut written = 0;
 
     for codeword_idx in 0..BATCH {
@@ -764,9 +624,9 @@ unsafe fn decode_simd_batch_neon<
             .iter()
             .any(|syndrome_row| syndrome_row[codeword_idx] != 0);
 
-        let data_slice = if has_errors && decoder.validate_rs {
+        let data_slice = if has_errors && validate_rs {
             // Copy to batch_codewords for error correction.
-            decoder.batch_codewords[codeword_idx] = batch_array[codeword_idx];
+            batch_codewords[codeword_idx] = batch_array[codeword_idx];
 
             // Fall back to scalar Reed-Solomon correction.
             let decode_fn = match PARITY_LEN {
@@ -776,17 +636,16 @@ unsafe fn decode_simd_batch_neon<
                 _ => return Err(error_invalid_data("unsupported parity length")),
             };
 
-            let corrected =
-                decode_fn(&mut decoder.batch_codewords[codeword_idx]).map_err(|_| {
-                    error_invalid_data("error correction couldn't correct a faulty block")
-                })?;
+            let corrected = decode_fn(&mut batch_codewords[codeword_idx]).map_err(|_| {
+                error_invalid_data("error correction couldn't correct a faulty block")
+            })?;
 
             if corrected {
                 eprintln!("Error correction corrected a faulty block in SIMD batch");
             }
 
             // Use corrected data.
-            &decoder.batch_codewords[codeword_idx][..DATA_LEN]
+            &batch_codewords[codeword_idx][..DATA_LEN]
         } else {
             // Use zero-copy path for error-free codewords.
             &batch_array[codeword_idx][..DATA_LEN]
@@ -1257,8 +1116,6 @@ impl<R: Read> Read for ECCDecoder<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_arch = "aarch64")]
-    use crate::reed_solomon::primitives;
     use crate::{Write, encoder::ECCEncoder, tests::Lcg};
 
     #[test]

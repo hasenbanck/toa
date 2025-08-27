@@ -23,75 +23,123 @@ fn encode_none<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usi
 }
 
 fn encode_standard<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    encoder.encode_with_rs::<_, 239, 16>(data, code_255_239::encode)
+    encoder.encode_scalar::<_, 239, 16>(data, code_255_239::encode)
 }
 
 fn encode_paranoid<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    encoder.encode_with_rs::<_, 223, 32>(data, code_255_223::encode)
+    encoder.encode_scalar::<_, 223, 32>(data, code_255_223::encode)
 }
 
 fn encode_extreme<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    encoder.encode_with_rs::<_, 191, 64>(data, code_255_191::encode)
+    encoder.encode_scalar::<_, 191, 64>(data, code_255_191::encode)
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_standard_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx2_gfni::<239, 16>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 32, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2_gfni::<_, 32, 239, 16>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_paranoid_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx2_gfni::<223, 32>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 32, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2_gfni::<_, 32, 223, 32>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_extreme_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx2_gfni::<191, 64>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 32, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2_gfni::<_, 32, 191, 64>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_standard_avx2<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx2::<239, 16>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 32, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2::<_, 32, 239, 16>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_paranoid_avx2<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx2::<223, 32>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 32, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2::<_, 32, 223, 32>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_extreme_avx2<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_avx2::<191, 64>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 32, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2::<_, 32, 191, 64>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_standard_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_ssse3::<239, 16>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 16, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_ssse3::<_, 16, 239, 16>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_paranoid_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_ssse3::<223, 32>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 16, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_ssse3::<_, 16, 223, 32>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 fn encode_extreme_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_ssse3::<191, 64>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 16, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_ssse3::<_, 16, 191, 64>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
 fn encode_standard_neon<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_neon::<239, 16>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 16, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_neon::<_, 16, 239, 16>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
 fn encode_paranoid_neon<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_neon::<223, 32>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 16, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_neon::<_, 16, 223, 32>(writer, batch_codewords)
+        })
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
 fn encode_extreme_neon<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
-    unsafe { encoder.encode_batch_neon::<191, 64>(data) }
+    unsafe {
+        encoder.encode_batch::<_, 16, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_neon::<_, 16, 191, 64>(writer, batch_codewords)
+        })
+    }
 }
 
 /// Error Correction Code Writer that applies Reed-Solomon encoding to compressed data.
@@ -375,7 +423,7 @@ impl<W: Write> ECCEncoder<W> {
     }
 
     #[inline(always)]
-    fn encode_with_rs<F, const DATA_LEN: usize, const PARITY_LEN: usize>(
+    fn encode_scalar<F, const DATA_LEN: usize, const PARITY_LEN: usize>(
         &mut self,
         data: &[u8],
         encode_rs_fn: F,
@@ -423,13 +471,14 @@ impl<W: Write> ECCEncoder<W> {
         Ok(input_processed)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2,gfni")]
-    unsafe fn encode_batch_avx2_gfni<const DATA_LEN: usize, const PARITY_LEN: usize>(
+    unsafe fn encode_batch<F, const BATCH: usize, const DATA_LEN: usize, const PARITY_LEN: usize>(
         &mut self,
         data: &[u8],
-    ) -> Result<usize> {
-        const BATCH: usize = 32;
+        simd_encode_fn: F,
+    ) -> Result<usize>
+    where
+        F: Fn(&mut W, &[[u8; DATA_LEN]; BATCH]) -> Result<()>,
+    {
         let batch_data_size = BATCH * DATA_LEN;
         let mut input_processed = 0;
 
@@ -440,12 +489,7 @@ impl<W: Write> ECCEncoder<W> {
                 .buffer
                 .fill_batch_from_buffer::<BATCH, DATA_LEN>(&mut batch_codewords, batch_data_size)
             {
-                unsafe {
-                    encode_simd_batch_avx2_gfni::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        &batch_codewords,
-                    )?;
-                }
+                simd_encode_fn(&mut self.inner, &batch_codewords)?;
 
                 self.buffer.consume(batch_data_size);
                 return Ok(0);
@@ -467,12 +511,7 @@ impl<W: Write> ECCEncoder<W> {
                 let batch_codewords: &[[u8; DATA_LEN]; BATCH] =
                     unsafe { &*(batch_slice.as_ptr() as *const [[u8; DATA_LEN]; BATCH]) };
 
-                unsafe {
-                    encode_simd_batch_avx2_gfni::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        batch_codewords,
-                    )?;
-                }
+                simd_encode_fn(&mut self.inner, batch_codewords)?;
 
                 input_processed += batch_data_size;
             }
@@ -491,258 +530,7 @@ impl<W: Write> ECCEncoder<W> {
                 codeword.copy_from_slice(&data[start..end]);
             }
 
-            unsafe {
-                encode_simd_batch_avx2_gfni::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                    &mut self.inner,
-                    &batch_codewords,
-                )?;
-            }
-
-            pos += batch_data_size;
-            input_processed += batch_data_size;
-        }
-
-        Ok(input_processed)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    unsafe fn encode_batch_avx2<const DATA_LEN: usize, const PARITY_LEN: usize>(
-        &mut self,
-        data: &[u8],
-    ) -> Result<usize> {
-        const BATCH: usize = 32;
-        let batch_data_size = BATCH * DATA_LEN;
-        let mut input_processed = 0;
-
-        if self.buffer.available_data() >= batch_data_size {
-            let mut batch_codewords = [[0u8; DATA_LEN]; BATCH];
-
-            if self
-                .buffer
-                .fill_batch_from_buffer::<BATCH, DATA_LEN>(&mut batch_codewords, batch_data_size)
-            {
-                unsafe {
-                    encode_simd_batch_avx2::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        &batch_codewords,
-                    )?;
-                }
-
-                self.buffer.consume(batch_data_size);
-                return Ok(0);
-            }
-        }
-
-        // Try to process aligned data directly without copying.
-        let (left, aligned, _right) = unsafe { data.align_to::<[u8; DATA_LEN]>() };
-
-        if left.is_empty() && aligned.len() >= BATCH {
-            // Data is perfectly aligned, and we have enough for at least one batch!
-            let batches_possible = aligned.len() / BATCH;
-
-            for batch_idx in 0..batches_possible {
-                let batch_start = batch_idx * BATCH;
-                let batch_slice = &aligned[batch_start..batch_start + BATCH];
-
-                // Safe transmute: we know the slice has exactly BATCH elements of [u8; DATA_LEN]
-                let batch_codewords: &[[u8; DATA_LEN]; BATCH] =
-                    unsafe { &*(batch_slice.as_ptr() as *const [[u8; DATA_LEN]; BATCH]) };
-
-                unsafe {
-                    encode_simd_batch_avx2::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        batch_codewords,
-                    )?;
-                }
-
-                input_processed += batch_data_size;
-            }
-
-            return Ok(input_processed);
-        }
-
-        // Fallback to copying approach for misaligned or insufficient data.
-        let mut pos = 0;
-        while pos + batch_data_size <= data.len() {
-            let mut batch_codewords = [[0u8; DATA_LEN]; BATCH];
-
-            for (i, codeword) in batch_codewords.iter_mut().enumerate() {
-                let start = pos + i * DATA_LEN;
-                let end = start + DATA_LEN;
-                codeword.copy_from_slice(&data[start..end]);
-            }
-
-            unsafe {
-                encode_simd_batch_avx2::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                    &mut self.inner,
-                    &batch_codewords,
-                )?;
-            }
-
-            pos += batch_data_size;
-            input_processed += batch_data_size;
-        }
-
-        Ok(input_processed)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "ssse3")]
-    unsafe fn encode_batch_ssse3<const DATA_LEN: usize, const PARITY_LEN: usize>(
-        &mut self,
-        data: &[u8],
-    ) -> Result<usize> {
-        const BATCH: usize = 16;
-        let batch_data_size = BATCH * DATA_LEN;
-        let mut input_processed = 0;
-
-        if self.buffer.available_data() >= batch_data_size {
-            let mut batch_codewords = [[0u8; DATA_LEN]; BATCH];
-
-            if self
-                .buffer
-                .fill_batch_from_buffer::<BATCH, DATA_LEN>(&mut batch_codewords, batch_data_size)
-            {
-                unsafe {
-                    encode_simd_batch_ssse3::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        &batch_codewords,
-                    )?;
-                }
-
-                self.buffer.consume(batch_data_size);
-                return Ok(0);
-            }
-        }
-
-        // Try to process aligned data directly without copying.
-        let (left, aligned, _right) = unsafe { data.align_to::<[u8; DATA_LEN]>() };
-
-        if left.is_empty() && aligned.len() >= BATCH {
-            // Data is perfectly aligned, and we have enough for at least one batch!
-            let batches_possible = aligned.len() / BATCH;
-
-            for batch_idx in 0..batches_possible {
-                let batch_start = batch_idx * BATCH;
-                let batch_slice = &aligned[batch_start..batch_start + BATCH];
-
-                // Safe transmute: we know the slice has exactly BATCH elements of [u8; DATA_LEN]
-                let batch_codewords: &[[u8; DATA_LEN]; BATCH] =
-                    unsafe { &*(batch_slice.as_ptr() as *const [[u8; DATA_LEN]; BATCH]) };
-
-                unsafe {
-                    encode_simd_batch_ssse3::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        batch_codewords,
-                    )?;
-                }
-
-                input_processed += batch_data_size;
-            }
-
-            return Ok(input_processed);
-        }
-
-        // Fallback to copying approach for misaligned or insufficient data.
-        let mut pos = 0;
-        while pos + batch_data_size <= data.len() {
-            let mut batch_codewords = [[0u8; DATA_LEN]; BATCH];
-
-            for (i, codeword) in batch_codewords.iter_mut().enumerate() {
-                let start = pos + i * DATA_LEN;
-                let end = start + DATA_LEN;
-                codeword.copy_from_slice(&data[start..end]);
-            }
-
-            unsafe {
-                encode_simd_batch_ssse3::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                    &mut self.inner,
-                    &batch_codewords,
-                )?;
-            }
-
-            pos += batch_data_size;
-            input_processed += batch_data_size;
-        }
-
-        Ok(input_processed)
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    #[target_feature(enable = "neon")]
-    unsafe fn encode_batch_neon<const DATA_LEN: usize, const PARITY_LEN: usize>(
-        &mut self,
-        data: &[u8],
-    ) -> Result<usize> {
-        const BATCH: usize = 16;
-        let batch_data_size = BATCH * DATA_LEN;
-        let mut input_processed = 0;
-
-        if self.buffer.available_data() >= batch_data_size {
-            let mut batch_codewords = [[0u8; DATA_LEN]; BATCH];
-
-            if self
-                .buffer
-                .fill_batch_from_buffer::<BATCH, DATA_LEN>(&mut batch_codewords, batch_data_size)
-            {
-                unsafe {
-                    encode_simd_batch_neon::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        &batch_codewords,
-                    )?;
-                }
-
-                self.buffer.consume(batch_data_size);
-                return Ok(0);
-            }
-        }
-
-        // Try to process aligned data directly without copying.
-        let (left, aligned, _right) = unsafe { data.align_to::<[u8; DATA_LEN]>() };
-
-        if left.is_empty() && aligned.len() >= BATCH {
-            // Data is perfectly aligned, and we have enough for at least one batch!
-            let batches_possible = aligned.len() / BATCH;
-
-            for batch_idx in 0..batches_possible {
-                let batch_start = batch_idx * BATCH;
-                let batch_slice = &aligned[batch_start..batch_start + BATCH];
-
-                // Safe transmute: we know the slice has exactly BATCH elements of [u8; DATA_LEN]
-                let batch_codewords: &[[u8; DATA_LEN]; BATCH] =
-                    unsafe { &*(batch_slice.as_ptr() as *const [[u8; DATA_LEN]; BATCH]) };
-
-                unsafe {
-                    encode_simd_batch_neon::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                        &mut self.inner,
-                        batch_codewords,
-                    )?;
-                }
-
-                input_processed += batch_data_size;
-            }
-
-            return Ok(input_processed);
-        }
-
-        // Fallback to copying approach for misaligned or insufficient data.
-        let mut pos = 0;
-        while pos + batch_data_size <= data.len() {
-            let mut batch_codewords = [[0u8; DATA_LEN]; BATCH];
-
-            for (i, codeword) in batch_codewords.iter_mut().enumerate() {
-                let start = pos + i * DATA_LEN;
-                let end = start + DATA_LEN;
-                codeword.copy_from_slice(&data[start..end]);
-            }
-
-            unsafe {
-                encode_simd_batch_neon::<_, BATCH, DATA_LEN, PARITY_LEN>(
-                    &mut self.inner,
-                    &batch_codewords,
-                )?;
-            }
+            simd_encode_fn(&mut self.inner, &batch_codewords)?;
 
             pos += batch_data_size;
             input_processed += batch_data_size;
@@ -838,11 +626,12 @@ unsafe fn encode_simd_batch_avx2_gfni<
 
     // Process each data byte position (from highest to lowest).
     for data_bytes in transposed_data.iter().rev() {
-        let data_vec = unsafe { _mm256_loadu_si256(data_bytes.as_ptr() as *const __m256i) };
+        let data_ptr = data_bytes.as_ptr() as *const __m256i;
+        let data_vec = unsafe { _mm256_loadu_si256(data_ptr) };
 
         // XOR with feedback from the highest remainder position.
-        let feedback_vec =
-            unsafe { _mm256_loadu_si256(remainder[PARITY_LEN - 1].as_ptr() as *const __m256i) };
+        let feedback_ptr = remainder[PARITY_LEN - 1].as_ptr() as *const __m256i;
+        let feedback_vec = unsafe { _mm256_loadu_si256(feedback_ptr) };
         let feedback = _mm256_xor_si256(data_vec, feedback_vec);
 
         // Shift remainder right.
@@ -857,10 +646,11 @@ unsafe fn encode_simd_batch_avx2_gfni<
                 let g_vec = _mm256_set1_epi8(g_coeff as i8);
                 let product = _mm256_gf2p8mul_epi8(feedback, g_vec);
 
-                let current =
-                    unsafe { _mm256_loadu_si256(remainder[i].as_ptr() as *const __m256i) };
+                let current_ptr = remainder[i].as_ptr() as *const __m256i;
+                let current = unsafe { _mm256_loadu_si256(current_ptr) };
                 let result = _mm256_xor_si256(current, product);
-                unsafe { _mm256_storeu_si256(remainder[i].as_mut_ptr() as *mut __m256i, result) };
+                let result_ptr = remainder[i].as_mut_ptr() as *mut __m256i;
+                unsafe { _mm256_storeu_si256(result_ptr, result) };
             }
         }
     }
@@ -912,11 +702,12 @@ unsafe fn encode_simd_batch_avx2<
 
     // Process each data byte position (from highest to lowest).
     for data_bytes in transposed_data.iter().rev() {
-        let data_vec = unsafe { _mm256_loadu_si256(data_bytes.as_ptr() as *const __m256i) };
+        let data_ptr = data_bytes.as_ptr() as *const __m256i;
+        let data_vec = unsafe { _mm256_loadu_si256(data_ptr) };
 
         // XOR with feedback from the highest remainder position.
-        let feedback_vec =
-            unsafe { _mm256_loadu_si256(remainder[PARITY_LEN - 1].as_ptr() as *const __m256i) };
+        let feedback_ptr = remainder[PARITY_LEN - 1].as_ptr() as *const __m256i;
+        let feedback_vec = unsafe { _mm256_loadu_si256(feedback_ptr) };
         let feedback = _mm256_xor_si256(data_vec, feedback_vec);
 
         // Shift remainder right.
@@ -962,12 +753,14 @@ unsafe fn apply_avx2_gf_multiplication<const BATCH: usize>(
 
     // Perform table lookups for low nibbles.
     // Note: We need to duplicate the 16-byte table to fill the 32-byte AVX2 register.
-    let low_table_128 = unsafe { _mm_loadu_si128(table.low_four.as_ptr() as *const __m128i) };
+    let low_table_ptr = table.low_four.as_ptr() as *const __m128i;
+    let low_table_128 = unsafe { _mm_loadu_si128(low_table_ptr) };
     let low_table = _mm256_broadcastsi128_si256(low_table_128);
     let low_products = _mm256_shuffle_epi8(low_table, low_nibbles);
 
     // Perform table lookups for high nibbles.
-    let high_table_128 = unsafe { _mm_loadu_si128(table.high_four.as_ptr() as *const __m128i) };
+    let high_table_ptr = table.high_four.as_ptr() as *const __m128i;
+    let high_table_128 = unsafe { _mm_loadu_si128(high_table_ptr) };
     let high_table = _mm256_broadcastsi128_si256(high_table_128);
     let high_products = _mm256_shuffle_epi8(high_table, high_nibbles);
 
@@ -975,9 +768,11 @@ unsafe fn apply_avx2_gf_multiplication<const BATCH: usize>(
     let products = _mm256_xor_si256(low_products, high_products);
 
     // XOR with current remainder.
-    let current = unsafe { _mm256_loadu_si256(remainder_row.as_ptr() as *const __m256i) };
+    let current_ptr = remainder_row.as_ptr() as *const __m256i;
+    let current = unsafe { _mm256_loadu_si256(current_ptr) };
     let result = _mm256_xor_si256(current, products);
-    unsafe { _mm256_storeu_si256(remainder_row.as_mut_ptr() as *mut __m256i, result) };
+    let result_ptr = remainder_row.as_mut_ptr() as *mut __m256i;
+    unsafe { _mm256_storeu_si256(result_ptr, result) };
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -1020,11 +815,12 @@ unsafe fn encode_simd_batch_ssse3<
 
     // Process each data byte position (from highest to lowest).
     for data_bytes in transposed_data.iter().rev() {
-        let data_vec = unsafe { _mm_loadu_si128(data_bytes.as_ptr() as *const __m128i) };
+        let data_ptr = data_bytes.as_ptr() as *const __m128i;
+        let data_vec = unsafe { _mm_loadu_si128(data_ptr) };
 
         // XOR with feedback from the highest remainder position.
-        let feedback_vec =
-            unsafe { _mm_loadu_si128(remainder[PARITY_LEN - 1].as_ptr() as *const __m128i) };
+        let feedback_ptr = remainder[PARITY_LEN - 1].as_ptr() as *const __m128i;
+        let feedback_vec = unsafe { _mm_loadu_si128(feedback_ptr) };
         let feedback = _mm_xor_si128(data_vec, feedback_vec);
 
         // Shift remainder right.
@@ -1071,20 +867,24 @@ unsafe fn apply_ssse3_gf_multiplication<const BATCH: usize>(
     let high_nibbles = _mm_and_si128(high_nibbles, low_nibble_mask);
 
     // Perform table lookups for low nibbles using SSSE3 shuffle.
-    let low_table = unsafe { _mm_loadu_si128(table.low_four.as_ptr() as *const __m128i) };
+    let low_table_ptr = table.low_four.as_ptr() as *const __m128i;
+    let low_table = unsafe { _mm_loadu_si128(low_table_ptr) };
     let low_products = _mm_shuffle_epi8(low_table, low_nibbles);
 
     // Perform table lookups for high nibbles using SSSE3 shuffle.
-    let high_table = unsafe { _mm_loadu_si128(table.high_four.as_ptr() as *const __m128i) };
+    let high_table_ptr = table.high_four.as_ptr() as *const __m128i;
+    let high_table = unsafe { _mm_loadu_si128(high_table_ptr) };
     let high_products = _mm_shuffle_epi8(high_table, high_nibbles);
 
     // Combine low and high products.
     let products = _mm_xor_si128(low_products, high_products);
 
     // XOR with current remainder.
-    let current = unsafe { _mm_loadu_si128(remainder_row.as_ptr() as *const __m128i) };
+    let current_ptr = remainder_row.as_ptr() as *const __m128i;
+    let current = unsafe { _mm_loadu_si128(current_ptr) };
     let result = _mm_xor_si128(current, products);
-    unsafe { _mm_storeu_si128(remainder_row.as_mut_ptr() as *mut __m128i, result) };
+    let result_ptr = remainder_row.as_mut_ptr() as *mut __m128i;
+    unsafe { _mm_storeu_si128(result_ptr, result) };
 }
 
 #[cfg(target_arch = "aarch64")]
