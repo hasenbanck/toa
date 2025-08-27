@@ -334,7 +334,7 @@ impl RangeDecoder {
 
         let b = decoder.read_u8()?;
         if b != 0x00 {
-            return Err(error_invalid_input("first byte is 0"));
+            return Err(error_invalid_input("first byte is not 0"));
         }
         self.code = decoder.read_u32()?;
 
