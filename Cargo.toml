@@ -17,6 +17,7 @@ repository = "https://github.com/hasenbanck/toa/"
 license = "Apache-2.0"
 version = "0.2.0"
 keywords = ["lzma", "toa", "compression"]
+categories = ["compression", "command-line-interface"]
 edition = "2024"
 rust-version = "1.89"
 exclude = ["tests/data/"]

@@ -8,11 +8,13 @@ documentation = "https://docs.rs/libtoa/latest/libtoa/"
 license = "Apache-2.0"
 version = "0.2.1"
 keywords = ["lzma", "toa", "compression", "streaming"]
+categories = ["compression"]
 edition = "2024"
 rust-version = "1.89"
 
 [dependencies]
 blake3 = { workspace = true }
+
 [dev-dependencies]
 hex-literal = { workspace = true }
 criterion = { workspace = true }

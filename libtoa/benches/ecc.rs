@@ -66,6 +66,8 @@ fn get_benchmark_name(error_correction: ErrorCorrection, simd_override: SimdOver
         SimdOverride::Auto => "auto",
         SimdOverride::ForceScalar => "scalar",
         #[cfg(target_arch = "x86_64")]
+        SimdOverride::ForceSse2Gfni => "sse2_gfni",
+        #[cfg(target_arch = "x86_64")]
         SimdOverride::ForceSsse3 => "ssse3",
         #[cfg(target_arch = "x86_64")]
         SimdOverride::ForceAvx2 => "avx2",
@@ -81,10 +83,17 @@ fn get_benchmark_name(error_correction: ErrorCorrection, simd_override: SimdOver
 fn check_simd_support(simd_override: SimdOverride, bench_name: &str) -> bool {
     #[cfg(target_arch = "x86_64")]
     match simd_override {
+        SimdOverride::ForceSse2Gfni
+            if !is_x86_feature_detected!("sse2") || !is_x86_feature_detected!("gfni") =>
+        {
+            eprintln!("Skipping {bench_name}: SSE2+GFNI not available");
+            return false;
+        }
         SimdOverride::ForceSsse3 if !is_x86_feature_detected!("ssse3") => {
             eprintln!("Skipping {bench_name}: SSSE3 not available");
             return false;
         }
+
         SimdOverride::ForceAvx2 if !is_x86_feature_detected!("avx2") => {
             eprintln!("Skipping {bench_name}: AVX2 not available");
             return false;
@@ -156,7 +165,7 @@ fn bench_ecc_decoder(
         return;
     }
 
-    let encoded_data = generate_encoded_data(error_correction, simd_override);
+    let encoded_data = generate_encoded_data(error_correction, SimdOverride::ForceAvx2Gfni);
     let throughput = Throughput::Bytes(encoded_data.len() as u64);
     group.throughput(throughput);
 
@@ -197,6 +206,8 @@ fn get_test_configurations() -> (Vec<ErrorCorrection>, Vec<SimdOverride>) {
     let simd_overrides = vec![
         SimdOverride::ForceScalar,
         SimdOverride::Auto,
+        #[cfg(target_arch = "x86_64")]
+        SimdOverride::ForceSse2Gfni,
         #[cfg(target_arch = "x86_64")]
         SimdOverride::ForceSsse3,
         #[cfg(target_arch = "x86_64")]

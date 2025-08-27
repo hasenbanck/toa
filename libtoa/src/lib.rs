@@ -348,6 +348,9 @@ pub enum SimdOverride {
     /// Force using scalar path.
     ForceScalar,
     #[cfg(target_arch = "x86_64")]
+    /// Force using SSE2 + GFNI path.
+    ForceSse2Gfni,
+    #[cfg(target_arch = "x86_64")]
     /// Force using SSSE3 path.
     ForceSsse3,
     #[cfg(target_arch = "x86_64")]

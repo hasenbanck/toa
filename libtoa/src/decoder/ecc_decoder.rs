@@ -1,10 +1,10 @@
 use alloc::{vec, vec::Vec};
 
 #[cfg(target_arch = "x86_64")]
-const ECC_BATCH_SIZE_AVX2: usize = 32;
+const ECC_BATCH_SIZE_AVX: usize = 32;
 
 #[cfg(target_arch = "x86_64")]
-const ECC_BATCH_SIZE_SSSE3: usize = 16;
+const ECC_BATCH_SIZE_SSE: usize = 16;
 
 #[cfg(target_arch = "x86_64")]
 use crate::reed_solomon::primitives;
@@ -126,57 +126,36 @@ where
 }
 
 #[cfg(target_arch = "x86_64")]
-fn decode_batch_standard_avx2_gfni<R: Read>(
+fn decode_batch_standard_sse2_gfni<R: Read>(
     decoder: &mut ECCDecoder<R>,
     buf: &mut [u8],
     bytes_read: usize,
 ) -> Result<usize> {
-    unsafe { decode_simd_batch_avx2_gfni::<R, 32, 239, 16>(decoder, buf, bytes_read) }
+    unsafe {
+        decode_simd_batch_sse2_gfni::<R, ECC_BATCH_SIZE_SSE, 239, 16>(decoder, buf, bytes_read)
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn decode_batch_paranoid_avx2_gfni<R: Read>(
+fn decode_batch_paranoid_sse2_gfni<R: Read>(
     decoder: &mut ECCDecoder<R>,
     buf: &mut [u8],
     bytes_read: usize,
 ) -> Result<usize> {
-    unsafe { decode_simd_batch_avx2_gfni::<R, 32, 223, 32>(decoder, buf, bytes_read) }
+    unsafe {
+        decode_simd_batch_sse2_gfni::<R, ECC_BATCH_SIZE_SSE, 223, 32>(decoder, buf, bytes_read)
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn decode_batch_extreme_avx2_gfni<R: Read>(
+fn decode_batch_extreme_sse2_gfni<R: Read>(
     decoder: &mut ECCDecoder<R>,
     buf: &mut [u8],
     bytes_read: usize,
 ) -> Result<usize> {
-    unsafe { decode_simd_batch_avx2_gfni::<R, 32, 191, 64>(decoder, buf, bytes_read) }
-}
-
-#[cfg(target_arch = "x86_64")]
-fn decode_batch_standard_avx2<R: Read>(
-    decoder: &mut ECCDecoder<R>,
-    buf: &mut [u8],
-    bytes_read: usize,
-) -> Result<usize> {
-    unsafe { decode_simd_batch_avx2::<R, 32, 239, 16>(decoder, buf, bytes_read) }
-}
-
-#[cfg(target_arch = "x86_64")]
-fn decode_batch_paranoid_avx2<R: Read>(
-    decoder: &mut ECCDecoder<R>,
-    buf: &mut [u8],
-    bytes_read: usize,
-) -> Result<usize> {
-    unsafe { decode_simd_batch_avx2::<R, 32, 223, 32>(decoder, buf, bytes_read) }
-}
-
-#[cfg(target_arch = "x86_64")]
-fn decode_batch_extreme_avx2<R: Read>(
-    decoder: &mut ECCDecoder<R>,
-    buf: &mut [u8],
-    bytes_read: usize,
-) -> Result<usize> {
-    unsafe { decode_simd_batch_avx2::<R, 32, 191, 64>(decoder, buf, bytes_read) }
+    unsafe {
+        decode_simd_batch_sse2_gfni::<R, ECC_BATCH_SIZE_SSE, 191, 64>(decoder, buf, bytes_read)
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -185,7 +164,7 @@ fn decode_batch_standard_ssse3<R: Read>(
     buf: &mut [u8],
     bytes_read: usize,
 ) -> Result<usize> {
-    unsafe { decode_simd_batch_ssse3::<R, 16, 239, 16>(decoder, buf, bytes_read) }
+    unsafe { decode_simd_batch_ssse3::<R, ECC_BATCH_SIZE_SSE, 239, 16>(decoder, buf, bytes_read) }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -194,7 +173,7 @@ fn decode_batch_paranoid_ssse3<R: Read>(
     buf: &mut [u8],
     bytes_read: usize,
 ) -> Result<usize> {
-    unsafe { decode_simd_batch_ssse3::<R, 16, 223, 32>(decoder, buf, bytes_read) }
+    unsafe { decode_simd_batch_ssse3::<R, ECC_BATCH_SIZE_SSE, 223, 32>(decoder, buf, bytes_read) }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -203,7 +182,67 @@ fn decode_batch_extreme_ssse3<R: Read>(
     buf: &mut [u8],
     bytes_read: usize,
 ) -> Result<usize> {
-    unsafe { decode_simd_batch_ssse3::<R, 16, 191, 64>(decoder, buf, bytes_read) }
+    unsafe { decode_simd_batch_ssse3::<R, ECC_BATCH_SIZE_SSE, 191, 64>(decoder, buf, bytes_read) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_standard_avx2<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe { decode_simd_batch_avx2::<R, ECC_BATCH_SIZE_AVX, 239, 16>(decoder, buf, bytes_read) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_paranoid_avx2<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe { decode_simd_batch_avx2::<R, ECC_BATCH_SIZE_AVX, 223, 32>(decoder, buf, bytes_read) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_extreme_avx2<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe { decode_simd_batch_avx2::<R, ECC_BATCH_SIZE_AVX, 191, 64>(decoder, buf, bytes_read) }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_standard_avx2_gfni<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe {
+        decode_simd_batch_avx2_gfni::<R, ECC_BATCH_SIZE_AVX, 239, 16>(decoder, buf, bytes_read)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_paranoid_avx2_gfni<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe {
+        decode_simd_batch_avx2_gfni::<R, ECC_BATCH_SIZE_AVX, 223, 32>(decoder, buf, bytes_read)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn decode_batch_extreme_avx2_gfni<R: Read>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    unsafe {
+        decode_simd_batch_avx2_gfni::<R, ECC_BATCH_SIZE_AVX, 191, 64>(decoder, buf, bytes_read)
+    }
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "std"))]
@@ -234,7 +273,7 @@ fn decode_batch_extreme_neon<R: Read>(
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,gfni")]
+#[target_feature(enable = "avx,avx2,gfni")]
 unsafe fn decode_simd_batch_avx2_gfni<
     R: Read,
     const BATCH: usize,
@@ -306,7 +345,7 @@ unsafe fn decode_simd_batch_avx2_gfni<
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx,avx2")]
 unsafe fn decode_simd_batch_avx2<
     R: Read,
     const BATCH: usize,
@@ -376,7 +415,7 @@ unsafe fn decode_simd_batch_avx2<
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx,avx2")]
 unsafe fn apply_avx2_gf_multiplication(
     data_vec: core::arch::x86_64::__m256i,
     power: usize,
@@ -410,7 +449,7 @@ unsafe fn apply_avx2_gf_multiplication(
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "ssse3")]
+#[target_feature(enable = "sse2,ssse3")]
 unsafe fn decode_simd_batch_ssse3<
     R: Read,
     const BATCH: usize,
@@ -480,7 +519,79 @@ unsafe fn decode_simd_batch_ssse3<
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "ssse3")]
+#[target_feature(enable = "sse2,gfni")]
+unsafe fn decode_simd_batch_sse2_gfni<
+    R: Read,
+    const BATCH: usize,
+    const DATA_LEN: usize,
+    const PARITY_LEN: usize,
+>(
+    decoder: &mut ECCDecoder<R>,
+    buf: &mut [u8],
+    bytes_read: usize,
+) -> Result<usize> {
+    use core::arch::x86_64::*;
+
+    assert!(buf.len() >= BATCH * DATA_LEN);
+    assert_eq!(bytes_read, BATCH * 255);
+
+    // Get aligned batch buffer - exactly BATCH * 255 bytes.
+    let aligned_buffer =
+        &decoder.aligned_batch_buffer[decoder.aligned_offset..decoder.aligned_offset + bytes_read];
+
+    // Convert aligned buffer to codewords using zero-copy alignment.
+    let (prefix, aligned_codewords, _suffix) = unsafe { aligned_buffer.align_to::<[u8; 255]>() };
+    assert!(prefix.is_empty());
+
+    let batch_array: &[[u8; 255]; BATCH] = aligned_codewords[..BATCH]
+        .try_into()
+        .map_err(|_| error_invalid_data("batch slice conversion failed"))?;
+
+    // Skip syndrome calculation entirely if validation is disabled.
+    if !decoder.validate_rs {
+        let written = copy_codeword_data::<BATCH, DATA_LEN>(&mut decoder.buffer, buf, batch_array);
+        return Ok(written);
+    }
+
+    // Calculate syndromes for all codewords in parallel (only when validation is enabled).
+    let transposed_codewords = crate::transpose_for_simd::<BATCH, 255>(batch_array);
+    let mut syndromes_transposed = [[0u8; BATCH]; PARITY_LEN];
+
+    // Calculate syndromes S_i = Σ(codeword[j] * α^(i*j)) for i=1..PARITY_LEN.
+    for syndrome_idx in 0..PARITY_LEN {
+        let mut syndrome_vec = _mm_setzero_si128();
+
+        for (byte_pos, byte_slice) in transposed_codewords.iter().enumerate() {
+            let data_ptr = byte_slice.as_ptr() as *const __m128i;
+            let data_vec = unsafe { _mm_loadu_si128(data_ptr) };
+
+            // Calculate α^(syndrome_idx * byte_pos) for all positions.
+            let power = ((syndrome_idx + 1) * byte_pos) % 255;
+            let alpha_coefficient = primitives::gf_alpha_pow(power as isize);
+            let alpha_vec = _mm_set1_epi8(alpha_coefficient as i8);
+
+            // Multiply data by α^power using GFNI.
+            let multiplied = _mm_gf2p8mul_epi8(data_vec, alpha_vec);
+
+            // Add to syndrome accumulator.
+            syndrome_vec = _mm_xor_si128(syndrome_vec, multiplied);
+        }
+
+        let syndrome_ptr = syndromes_transposed[syndrome_idx].as_mut_ptr() as *mut __m128i;
+        unsafe { _mm_storeu_si128(syndrome_ptr, syndrome_vec) };
+    }
+
+    process_codewords::<BATCH, DATA_LEN, PARITY_LEN>(
+        decoder.validate_rs,
+        &mut decoder.batch_codewords,
+        buf,
+        batch_array,
+        &mut syndromes_transposed,
+    )
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2,ssse3")]
 unsafe fn apply_ssse3_gf_multiplication(
     data_vec: core::arch::x86_64::__m128i,
     power: usize,
@@ -714,20 +825,15 @@ impl<R: Read> ECCDecoder<R> {
         match error_correction {
             ErrorCorrection::None => (None, 1),
             ErrorCorrection::Standard => {
-                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
                     (
-                        Some(decode_batch_standard_avx2_gfni as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_AVX2,
-                    )
-                } else if is_x86_feature_detected!("avx2") {
-                    (
-                        Some(decode_batch_standard_avx2 as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_AVX2,
+                        Some(decode_batch_standard_sse2_gfni as DecodeBatchFunction<R>),
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else if is_x86_feature_detected!("ssse3") {
                     (
                         Some(decode_batch_standard_ssse3 as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_SSSE3,
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else {
                     (None, 16)
@@ -737,37 +843,37 @@ impl<R: Read> ECCDecoder<R> {
                 if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
                         Some(decode_batch_paranoid_avx2_gfni as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
+                    )
+                } else if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    (
+                        Some(decode_batch_paranoid_sse2_gfni as DecodeBatchFunction<R>),
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(decode_batch_paranoid_avx2 as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
                     )
                 } else if is_x86_feature_detected!("ssse3") {
                     (
                         Some(decode_batch_paranoid_ssse3 as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_SSSE3,
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else {
                     (None, 16)
                 }
             }
             ErrorCorrection::Extreme => {
-                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
+                if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
                     (
-                        Some(decode_batch_extreme_avx2_gfni as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_AVX2,
-                    )
-                } else if is_x86_feature_detected!("avx2") {
-                    (
-                        Some(decode_batch_extreme_avx2 as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_AVX2,
+                        Some(decode_batch_extreme_sse2_gfni as DecodeBatchFunction<R>),
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else if is_x86_feature_detected!("ssse3") {
                     (
                         Some(decode_batch_extreme_ssse3 as DecodeBatchFunction<R>),
-                        ECC_BATCH_SIZE_SSSE3,
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else {
                     (None, 16)
@@ -818,21 +924,46 @@ impl<R: Read> ECCDecoder<R> {
             SimdOverride::Auto => Self::get_batch_function(error_correction),
             SimdOverride::ForceScalar => (None, 1),
             #[cfg(target_arch = "x86_64")]
+            SimdOverride::ForceSse2Gfni => {
+                if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    match error_correction {
+                        ErrorCorrection::None => (None, 1),
+                        ErrorCorrection::Standard => (
+                            Some(decode_batch_standard_sse2_gfni as DecodeBatchFunction<R>),
+                            ECC_BATCH_SIZE_SSE,
+                        ),
+                        ErrorCorrection::Paranoid => (
+                            Some(decode_batch_paranoid_sse2_gfni as DecodeBatchFunction<R>),
+                            ECC_BATCH_SIZE_SSE,
+                        ),
+                        ErrorCorrection::Extreme => (
+                            Some(decode_batch_extreme_sse2_gfni as DecodeBatchFunction<R>),
+                            ECC_BATCH_SIZE_SSE,
+                        ),
+                    }
+                } else {
+                    eprintln!(
+                        "Warning: SSE2+GFNI requested but not available, falling back to scalar"
+                    );
+                    (None, 1)
+                }
+            }
+            #[cfg(target_arch = "x86_64")]
             SimdOverride::ForceSsse3 => {
                 if is_x86_feature_detected!("ssse3") {
                     match error_correction {
                         ErrorCorrection::None => (None, 1),
                         ErrorCorrection::Standard => (
                             Some(decode_batch_standard_ssse3 as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_SSSE3,
+                            ECC_BATCH_SIZE_SSE,
                         ),
                         ErrorCorrection::Paranoid => (
                             Some(decode_batch_paranoid_ssse3 as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_SSSE3,
+                            ECC_BATCH_SIZE_SSE,
                         ),
                         ErrorCorrection::Extreme => (
                             Some(decode_batch_extreme_ssse3 as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_SSSE3,
+                            ECC_BATCH_SIZE_SSE,
                         ),
                     }
                 } else {
@@ -840,6 +971,7 @@ impl<R: Read> ECCDecoder<R> {
                     (None, 1)
                 }
             }
+
             #[cfg(target_arch = "x86_64")]
             SimdOverride::ForceAvx2 => {
                 if is_x86_feature_detected!("avx2") {
@@ -847,15 +979,15 @@ impl<R: Read> ECCDecoder<R> {
                         ErrorCorrection::None => (None, 1),
                         ErrorCorrection::Standard => (
                             Some(decode_batch_standard_avx2 as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Paranoid => (
                             Some(decode_batch_paranoid_avx2 as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Extreme => (
                             Some(decode_batch_extreme_avx2 as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                     }
                 } else {
@@ -870,15 +1002,15 @@ impl<R: Read> ECCDecoder<R> {
                         ErrorCorrection::None => (None, 1),
                         ErrorCorrection::Standard => (
                             Some(decode_batch_standard_avx2_gfni as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Paranoid => (
                             Some(decode_batch_paranoid_avx2_gfni as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Extreme => (
                             Some(decode_batch_extreme_avx2_gfni as DecodeBatchFunction<R>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                     }
                 } else {
@@ -999,7 +1131,7 @@ impl<R: Read> ECCDecoder<R> {
 
         let mut written = 0;
 
-        // First serve any buffered data
+        // First serve any buffered data.
         if self.buffer.available_data() > 0 {
             let copied = self.buffer.copy_to(&mut buf[written..]);
             self.buffer.consume(copied);
@@ -1312,6 +1444,14 @@ mod tests {
 
             #[cfg(target_arch = "x86_64")]
             {
+                if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    let test_name = format!("SSE2 + GFNI vs Scalar - {ec_name}");
+                    all_passed &=
+                        test_simd_path_consistency(ec, SimdOverride::ForceSse2Gfni, &test_name);
+                } else {
+                    println!("⊗ SSE2 + GFNI not available on this CPU - {ec_name}");
+                }
+
                 if is_x86_feature_detected!("ssse3") {
                     let test_name = format!("SSSE3 vs Scalar - {ec_name}");
                     all_passed &=

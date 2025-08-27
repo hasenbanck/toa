@@ -7,10 +7,10 @@ use crate::{
 };
 
 #[cfg(target_arch = "x86_64")]
-const ECC_BATCH_SIZE_AVX2: usize = 32;
+const ECC_BATCH_SIZE_AVX: usize = 32;
 
 #[cfg(target_arch = "x86_64")]
-const ECC_BATCH_SIZE_SSSE3: usize = 16;
+const ECC_BATCH_SIZE_SSE: usize = 16;
 
 #[cfg(target_arch = "aarch64")]
 const ECC_BATCH_SIZE_NEON: usize = 16;
@@ -35,28 +35,55 @@ fn encode_extreme<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_standard_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+fn encode_standard_sse2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     unsafe {
-        encoder.encode_batch::<_, 32, 239, 16>(data, |writer, batch_codewords| {
-            encode_simd_batch_avx2_gfni::<_, 32, 239, 16>(writer, batch_codewords)
+        encoder.encode_batch::<_, 16, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_sse2_gfni::<_, 16, 239, 16>(writer, batch_codewords)
         })
     }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_paranoid_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+fn encode_paranoid_sse2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     unsafe {
-        encoder.encode_batch::<_, 32, 223, 32>(data, |writer, batch_codewords| {
-            encode_simd_batch_avx2_gfni::<_, 32, 223, 32>(writer, batch_codewords)
+        encoder.encode_batch::<_, 16, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_sse2_gfni::<_, 16, 223, 32>(writer, batch_codewords)
         })
     }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_extreme_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+fn encode_extreme_sse2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     unsafe {
-        encoder.encode_batch::<_, 32, 191, 64>(data, |writer, batch_codewords| {
-            encode_simd_batch_avx2_gfni::<_, 32, 191, 64>(writer, batch_codewords)
+        encoder.encode_batch::<_, 16, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_sse2_gfni::<_, 16, 191, 64>(writer, batch_codewords)
+        })
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn encode_standard_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+    unsafe {
+        encoder.encode_batch::<_, 16, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_ssse3::<_, 16, 239, 16>(writer, batch_codewords)
+        })
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn encode_paranoid_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+    unsafe {
+        encoder.encode_batch::<_, 16, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_ssse3::<_, 16, 223, 32>(writer, batch_codewords)
+        })
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn encode_extreme_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+    unsafe {
+        encoder.encode_batch::<_, 16, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_ssse3::<_, 16, 191, 64>(writer, batch_codewords)
         })
     }
 }
@@ -89,28 +116,28 @@ fn encode_extreme_avx2<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Re
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_standard_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+fn encode_standard_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     unsafe {
-        encoder.encode_batch::<_, 16, 239, 16>(data, |writer, batch_codewords| {
-            encode_simd_batch_ssse3::<_, 16, 239, 16>(writer, batch_codewords)
+        encoder.encode_batch::<_, 32, 239, 16>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2_gfni::<_, 32, 239, 16>(writer, batch_codewords)
         })
     }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_paranoid_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+fn encode_paranoid_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     unsafe {
-        encoder.encode_batch::<_, 16, 223, 32>(data, |writer, batch_codewords| {
-            encode_simd_batch_ssse3::<_, 16, 223, 32>(writer, batch_codewords)
+        encoder.encode_batch::<_, 32, 223, 32>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2_gfni::<_, 32, 223, 32>(writer, batch_codewords)
         })
     }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn encode_extreme_ssse3<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
+fn encode_extreme_avx2_gfni<W: Write>(encoder: &mut ECCEncoder<W>, data: &[u8]) -> Result<usize> {
     unsafe {
-        encoder.encode_batch::<_, 16, 191, 64>(data, |writer, batch_codewords| {
-            encode_simd_batch_ssse3::<_, 16, 191, 64>(writer, batch_codewords)
+        encoder.encode_batch::<_, 32, 191, 64>(data, |writer, batch_codewords| {
+            encode_simd_batch_avx2_gfni::<_, 32, 191, 64>(writer, batch_codewords)
         })
     }
 }
@@ -161,17 +188,22 @@ impl<W: Write> ECCEncoder<W> {
                 if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
                         Some(encode_standard_avx2_gfni as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
                     )
                 } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(encode_standard_avx2 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
+                    )
+                } else if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    (
+                        Some(encode_standard_sse2_gfni as EncodeFunction<W>),
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else if is_x86_feature_detected!("ssse3") {
                     (
                         Some(encode_standard_ssse3 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_SSSE3,
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else {
                     (None, 1)
@@ -181,17 +213,22 @@ impl<W: Write> ECCEncoder<W> {
                 if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
                         Some(encode_paranoid_avx2_gfni as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
                     )
                 } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(encode_paranoid_avx2 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
+                    )
+                } else if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    (
+                        Some(encode_paranoid_sse2_gfni as EncodeFunction<W>),
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else if is_x86_feature_detected!("ssse3") {
                     (
                         Some(encode_paranoid_ssse3 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_SSSE3,
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else {
                     (None, 1)
@@ -201,17 +238,22 @@ impl<W: Write> ECCEncoder<W> {
                 if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("gfni") {
                     (
                         Some(encode_extreme_avx2_gfni as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
                     )
                 } else if is_x86_feature_detected!("avx2") {
                     (
                         Some(encode_extreme_avx2 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_AVX2,
+                        ECC_BATCH_SIZE_AVX,
+                    )
+                } else if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    (
+                        Some(encode_extreme_sse2_gfni as EncodeFunction<W>),
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else if is_x86_feature_detected!("ssse3") {
                     (
                         Some(encode_extreme_ssse3 as EncodeFunction<W>),
-                        ECC_BATCH_SIZE_SSSE3,
+                        ECC_BATCH_SIZE_SSE,
                     )
                 } else {
                     (None, 1)
@@ -278,19 +320,44 @@ impl<W: Write> ECCEncoder<W> {
                         ErrorCorrection::None => (None, 1),
                         ErrorCorrection::Standard => (
                             Some(encode_standard_ssse3 as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_SSSE3,
+                            ECC_BATCH_SIZE_SSE,
                         ),
                         ErrorCorrection::Paranoid => (
                             Some(encode_paranoid_ssse3 as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_SSSE3,
+                            ECC_BATCH_SIZE_SSE,
                         ),
                         ErrorCorrection::Extreme => (
                             Some(encode_extreme_ssse3 as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_SSSE3,
+                            ECC_BATCH_SIZE_SSE,
                         ),
                     }
                 } else {
                     eprintln!("Warning: SSSE3 requested but not available, falling back to scalar");
+                    (None, 1)
+                }
+            }
+            #[cfg(target_arch = "x86_64")]
+            SimdOverride::ForceSse2Gfni => {
+                if is_x86_feature_detected!("ssse3") && is_x86_feature_detected!("gfni") {
+                    match error_correction {
+                        ErrorCorrection::None => (None, 1),
+                        ErrorCorrection::Standard => (
+                            Some(encode_standard_sse2_gfni as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_SSE,
+                        ),
+                        ErrorCorrection::Paranoid => (
+                            Some(encode_paranoid_sse2_gfni as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_SSE,
+                        ),
+                        ErrorCorrection::Extreme => (
+                            Some(encode_extreme_sse2_gfni as EncodeFunction<W>),
+                            ECC_BATCH_SIZE_SSE,
+                        ),
+                    }
+                } else {
+                    eprintln!(
+                        "Warning: SSSE3+GFNI requested but not available, falling back to scalar"
+                    );
                     (None, 1)
                 }
             }
@@ -301,15 +368,15 @@ impl<W: Write> ECCEncoder<W> {
                         ErrorCorrection::None => (None, 1),
                         ErrorCorrection::Standard => (
                             Some(encode_standard_avx2 as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Paranoid => (
                             Some(encode_paranoid_avx2 as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Extreme => (
                             Some(encode_extreme_avx2 as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                     }
                 } else {
@@ -324,15 +391,15 @@ impl<W: Write> ECCEncoder<W> {
                         ErrorCorrection::None => (None, 1),
                         ErrorCorrection::Standard => (
                             Some(encode_standard_avx2_gfni as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Paranoid => (
                             Some(encode_paranoid_avx2_gfni as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                         ErrorCorrection::Extreme => (
                             Some(encode_extreme_avx2_gfni as EncodeFunction<W>),
-                            ECC_BATCH_SIZE_AVX2,
+                            ECC_BATCH_SIZE_AVX,
                         ),
                     }
                 } else {
@@ -667,7 +734,7 @@ unsafe fn encode_simd_batch_avx2_gfni<
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx,avx2")]
 unsafe fn encode_simd_batch_avx2<
     R: Write,
     const BATCH: usize,
@@ -737,7 +804,7 @@ unsafe fn encode_simd_batch_avx2<
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx,avx2")]
 unsafe fn apply_avx2_gf_multiplication<const BATCH: usize>(
     feedback: &core::arch::x86_64::__m256i,
     remainder_row: &mut [u8; BATCH],
@@ -776,7 +843,68 @@ unsafe fn apply_avx2_gf_multiplication<const BATCH: usize>(
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "ssse3")]
+#[target_feature(enable = "sse2,gfni")]
+unsafe fn encode_simd_batch_sse2_gfni<
+    R: Write,
+    const BATCH: usize,
+    const DATA_LEN: usize,
+    const PARITY_LEN: usize,
+>(
+    mut writer: R,
+    batch_codewords: &[[u8; DATA_LEN]; BATCH],
+) -> Result<()> {
+    use core::arch::x86_64::*;
+
+    let transposed_data = crate::transpose_for_simd::<BATCH, DATA_LEN>(batch_codewords);
+    let gen_poly = get_generator_poly::<PARITY_LEN>();
+
+    // LFSR-based encoding with SIMD.
+    let mut remainder = [[0u8; BATCH]; PARITY_LEN];
+
+    // Process each data byte position (from highest to lowest).
+    for data_bytes in transposed_data.iter().rev() {
+        let data_ptr = data_bytes.as_ptr() as *const __m128i;
+        let data_vec = unsafe { _mm_loadu_si128(data_ptr) };
+
+        // XOR with feedback from the highest remainder position.
+        let feedback_ptr = remainder[PARITY_LEN - 1].as_ptr() as *const __m128i;
+        let feedback_vec = unsafe { _mm_loadu_si128(feedback_ptr) };
+        let feedback = _mm_xor_si128(data_vec, feedback_vec);
+
+        // Shift remainder right.
+        for i in (1..PARITY_LEN).rev() {
+            remainder[i] = remainder[i - 1];
+        }
+        remainder[0] = [0u8; BATCH];
+
+        // Apply generator polynomial multiplication with GFNI.
+        for (i, &g_coeff) in gen_poly[..PARITY_LEN].iter().enumerate() {
+            if g_coeff != 0 {
+                let g_vec = _mm_set1_epi8(g_coeff as i8);
+                let product = _mm_gf2p8mul_epi8(feedback, g_vec);
+
+                let current_ptr = remainder[i].as_ptr() as *const __m128i;
+                let current = unsafe { _mm_loadu_si128(current_ptr) };
+                let result = _mm_xor_si128(current, product);
+                let result_ptr = remainder[i].as_mut_ptr() as *mut __m128i;
+                unsafe { _mm_storeu_si128(result_ptr, result) };
+            }
+        }
+    }
+
+    let (data_codewords, parity_codewords) =
+        crate::transpose_from_simd::<BATCH, DATA_LEN, PARITY_LEN>(&transposed_data, &remainder);
+
+    for i in 0..BATCH {
+        writer.write_all(&data_codewords[i])?;
+        writer.write_all(&parity_codewords[i])?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2,ssse3")]
 unsafe fn encode_simd_batch_ssse3<
     R: Write,
     const BATCH: usize,
@@ -850,7 +978,7 @@ unsafe fn encode_simd_batch_ssse3<
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "ssse3")]
+#[target_feature(enable = "sse2,ssse3")]
 unsafe fn apply_ssse3_gf_multiplication<const BATCH: usize>(
     feedback: &core::arch::x86_64::__m128i,
     remainder_row: &mut [u8; BATCH],
@@ -1116,6 +1244,14 @@ mod tests {
 
             #[cfg(target_arch = "x86_64")]
             {
+                if is_x86_feature_detected!("sse2") && is_x86_feature_detected!("gfni") {
+                    let test_name = format!("SSE2 + GFNI vs Scalar - {ec_name}");
+                    all_passed &=
+                        test_simd_path_consistency(ec, SimdOverride::ForceSse2Gfni, &test_name);
+                } else {
+                    println!("⊗ SSE2 + GFNI not available on this CPU - {ec_name}");
+                }
+
                 if is_x86_feature_detected!("ssse3") {
                     let test_name = format!("SSSE3 vs Scalar - {ec_name}");
                     all_passed &=
