@@ -1,4 +1,4 @@
-use std::{fs, fs::File, time::Instant};
+use std::{fs, fs::File, path::Path, time::Instant};
 
 use libtoa::{TOAFileEncoder, TOAOptions, copy_wide};
 
@@ -30,9 +30,10 @@ fn calculate_block_size_exponent(file_size: u64, block_count: u64) -> Option<u8>
 
 pub(crate) fn compress_file(
     cli: &Cli,
+    input_path: &Path,
     output_path: &str,
 ) -> std::io::Result<(u64, u64, std::time::Duration)> {
-    let file_size = fs::metadata(&cli.input)?.len();
+    let file_size = fs::metadata(input_path)?.len();
     let mut output_file = File::create(output_path)?;
 
     let mut options = TOAOptions::from_preset(cli.preset);
@@ -78,7 +79,7 @@ pub(crate) fn compress_file(
 
     options = options.with_error_correction(cli.ecc);
 
-    let mut toa_encoder = TOAFileEncoder::new(&cli.input, options, cli.threads)?;
+    let mut toa_encoder = TOAFileEncoder::new(input_path, options, cli.threads)?;
 
     let start_time = Instant::now();
 

@@ -3,9 +3,10 @@ mod decompression;
 mod list;
 mod util;
 
-use std::{fs, io::Result, process};
+use std::{fs, io::Result, path::PathBuf, process};
 
 use clap::{Arg, ArgMatches, Command, value_parser};
+use glob::glob;
 use libtoa::{ErrorCorrection, Prefilter};
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
 };
 
 struct Cli {
-    input: String,
+    inputs: Vec<PathBuf>,
     output: Option<String>,
     extract: bool,
     list: bool,
@@ -52,9 +53,10 @@ impl Cli {
             .arg_required_else_help(true)
             .arg(
                 Arg::new("input")
-                    .help("Input file to compress or decompress")
+                    .help("Input file(s) to compress or decompress (supports wildcards)")
                     .value_name("FILE")
                     .required(true)
+                    .num_args(1..)
                     .index(1),
             )
             .arg(
@@ -324,8 +326,45 @@ impl Cli {
             n => n,
         };
 
+        let input_patterns: Vec<String> = matches
+            .get_many::<String>("input")
+            .unwrap()
+            .cloned()
+            .collect();
+
+        let mut inputs = Vec::new();
+        for pattern in input_patterns {
+            if pattern.contains('*') {
+                match glob(&pattern) {
+                    Ok(paths) => {
+                        for entry in paths {
+                            match entry {
+                                Ok(path) => inputs.push(path),
+                                Err(error) => {
+                                    eprintln!(
+                                        "Warning: Error reading path in pattern '{pattern}': {error}",
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Error: Invalid pattern '{pattern}': {error}");
+                        process::exit(1);
+                    }
+                }
+            } else {
+                inputs.push(PathBuf::from(pattern));
+            }
+        }
+
+        if inputs.is_empty() {
+            eprintln!("Error: No files found matching the specified pattern(s)");
+            process::exit(1);
+        }
+
         Self {
-            input: matches.get_one::<String>("input").unwrap().clone(),
+            inputs,
             output: matches.get_one::<String>("output").cloned(),
             extract: matches.get_flag("extract"),
             list: matches.get_flag("list"),
@@ -414,149 +453,192 @@ fn main() -> Result<()> {
     let matches = Cli::build_command().get_matches();
     let cli = Cli::from_matches(&matches);
 
-    if cli.list {
-        // List mode - show metadata.
-        if let Err(error) = list_file_info(&cli.input) {
-            eprintln!("Error: Can't list file content: {error}");
-            process::exit(1);
+    // Check for output argument conflicts with multiple files.
+    if cli.inputs.len() > 1 && cli.output.is_some() {
+        eprintln!("Error: --output cannot be used with multiple input files");
+        process::exit(1);
+    }
+
+    for input_path in cli.inputs.clone() {
+        let input_str = input_path.to_string_lossy().to_string();
+
+        if cli.inputs.len() > 1 && cli.verbose {
+            println!("Processing: {}", input_str);
         }
-    } else if cli.test {
-        // Test mode - decompress without storing output.
-        let (compressed_size, uncompressed_size, elapsed) = match test_file(&cli.input, cli.threads)
-        {
-            Ok(result) => result,
-            Err(error) => {
-                eprintln!("Error: Can't test file: {error}");
+
+        if cli.list {
+            // List mode - show metadata.
+            if let Err(error) = list_file_info(&input_str) {
+                eprintln!("Error: Can't list file content for '{input_str}': {error}");
                 process::exit(1);
             }
-        };
-
-        if cli.verbose {
-            let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
-                (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
-            } else {
-                0.0
-            };
-
-            println!("Compressed:   {}", format_size(compressed_size));
-            println!("Uncompressed: {}", format_size(uncompressed_size));
-            println!(
-                "Compression ratio: {:.2}%",
-                if uncompressed_size > 0 {
-                    (compressed_size as f64 / uncompressed_size as f64) * 100.0
-                } else {
-                    0.0
-                },
-            );
-            println!("Test time: {:.3}s", elapsed.as_secs_f64(),);
-            println!("Test speed: {speed_mibs:.1} MiB/s");
-        }
-
-        println!("Test completed successfully");
-    } else if cli.extract {
-        // Extraction mode.
-        let output_filename = cli.output.clone().unwrap_or_else(|| {
-            if cli.input.ends_with(".toa") {
-                cli.input[..cli.input.len() - 4].to_string()
-            } else {
-                format!("{}.extracted", cli.input)
+            if cli.inputs.len() > 1 {
+                println!();
             }
-        });
-
-        let (compressed_size, uncompressed_size, elapsed) =
-            match decompress_file(&cli.input, &output_filename, cli.threads) {
-                Ok(result) => result,
-                Err(error) => {
-                    eprintln!("Error: Can't decompress file: {error}");
-                    process::exit(1);
-                }
-            };
-
-        if cli.verbose {
-            let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
-                (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
-            } else {
-                0.0
-            };
-
-            println!("Compressed:   {}", format_size(compressed_size));
-            println!("Uncompressed: {}", format_size(uncompressed_size));
-            println!(
-                "Compression ratio: {:.2}%",
-                if uncompressed_size > 0 {
-                    (compressed_size as f64 / uncompressed_size as f64) * 100.0
-                } else {
-                    0.0
-                },
-            );
-            println!("Decompression time: {:.3}s", elapsed.as_secs_f64(),);
-            println!("Decompression speed: {speed_mibs:.1} MiB/s");
-        }
-
-        if !cli.keep
-            && let Err(error) = fs::remove_file(&cli.input)
-        {
-            eprintln!("Warning: Failed to remove input file: {error}");
-        }
-    } else {
-        // Compression mode.
-        let output_filename = cli
-            .output
-            .clone()
-            .unwrap_or_else(|| format!("{}.toa", cli.input));
-
-        let (uncompressed_size, compressed_size, elapsed) =
-            match compress_file(&cli, &output_filename) {
-                Ok(result) => result,
-                Err(error) => {
-                    eprintln!("Error: Can't compress file: {error}");
-                    process::exit(1);
-                }
-            };
-
-        if cli.verify {
-            if cli.verbose {
-                println!("Verifying compressed file...");
-            }
-
-            if let Err(error) = test_file(&output_filename, cli.threads) {
-                eprintln!("Error: Verification failed - compressed file is corrupt: {error}");
-                if let Err(remove_error) = fs::remove_file(&output_filename) {
-                    eprintln!("Warning: Failed to remove corrupt compressed file: {remove_error}");
-                }
-                process::exit(1);
-            }
+        } else if cli.test {
+            // Test mode - decompress without storing output.
+            let (compressed_size, uncompressed_size, elapsed) =
+                match test_file(&input_str, cli.threads) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        eprintln!("Error: Can't test file '{input_str}': {error}");
+                        process::exit(1);
+                    }
+                };
 
             if cli.verbose {
-                println!("Verification successful");
-            }
-        }
-
-        if cli.verbose {
-            let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
-                (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
-            } else {
-                0.0
-            };
-
-            println!("Compressed:   {}", format_size(compressed_size));
-            println!("Uncompressed: {}", format_size(uncompressed_size));
-            println!(
-                "Compression ratio: {:.2}%",
-                if uncompressed_size > 0 {
-                    (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+                    (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
                 } else {
                     0.0
-                },
-            );
-            println!("Compression time: {:.3}s", elapsed.as_secs_f64(),);
-            println!("Compression speed: {speed_mibs:.1} MiB/s");
-        }
+                };
 
-        if !cli.keep
-            && let Err(error) = fs::remove_file(&cli.input)
-        {
-            eprintln!("Warning: Failed to remove input file: {error}");
+                if cli.inputs.len() > 1 {
+                    println!("File: {input_str}");
+                }
+                println!("Compressed:   {}", format_size(compressed_size));
+                println!("Uncompressed: {}", format_size(uncompressed_size));
+                println!(
+                    "Compression ratio: {:.2}%",
+                    if uncompressed_size > 0 {
+                        (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                    } else {
+                        0.0
+                    },
+                );
+                println!("Test time: {:.3}s", elapsed.as_secs_f64(),);
+                println!("Test speed: {speed_mibs:.1} MiB/s");
+                if cli.inputs.len() > 1 {
+                    println!();
+                }
+            }
+
+            if cli.inputs.len() == 1 {
+                println!("Test completed successfully");
+            } else {
+                println!("Test completed successfully for '{}'", input_str);
+            }
+        } else if cli.extract {
+            // Extraction mode.
+            let output_filename = cli.output.clone().unwrap_or_else(|| {
+                if input_str.ends_with(".toa") {
+                    input_str[..input_str.len() - 4].to_string()
+                } else {
+                    format!("{input_str}.extracted")
+                }
+            });
+
+            let (compressed_size, uncompressed_size, elapsed) =
+                match decompress_file(&input_str, &output_filename, cli.threads) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        eprintln!("Error: Can't decompress file '{input_str}': {error}");
+                        process::exit(1);
+                    }
+                };
+
+            if cli.verbose {
+                let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+                    (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
+                } else {
+                    0.0
+                };
+
+                if cli.inputs.len() > 1 {
+                    println!("File: {input_str}");
+                }
+                println!("Compressed:   {}", format_size(compressed_size));
+                println!("Uncompressed: {}", format_size(uncompressed_size));
+                println!(
+                    "Compression ratio: {:.2}%",
+                    if uncompressed_size > 0 {
+                        (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                    } else {
+                        0.0
+                    },
+                );
+                println!("Decompression time: {:.3}s", elapsed.as_secs_f64(),);
+                println!("Decompression speed: {speed_mibs:.1} MiB/s");
+                if cli.inputs.len() > 1 {
+                    println!();
+                }
+            }
+
+            if !cli.keep
+                && let Err(error) = fs::remove_file(&input_str)
+            {
+                eprintln!("Warning: Failed to remove input file '{input_str}': {error}");
+            }
+        } else {
+            // Compression mode.
+            let output_filename = cli
+                .output
+                .clone()
+                .unwrap_or_else(|| format!("{input_str}.toa"));
+
+            let (uncompressed_size, compressed_size, elapsed) =
+                match compress_file(&cli, input_path.as_path(), &output_filename) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        eprintln!("Error: Can't compress file '{input_str}': {error}");
+                        process::exit(1);
+                    }
+                };
+
+            if cli.verify {
+                if cli.verbose {
+                    println!("Verifying compressed file...");
+                }
+
+                if let Err(error) = test_file(&output_filename, cli.threads) {
+                    eprintln!(
+                        "Error: Verification failed - compressed file '{output_filename}' is corrupt: {error}"
+                    );
+                    if let Err(remove_error) = fs::remove_file(&output_filename) {
+                        eprintln!(
+                            "Warning: Failed to remove corrupt compressed file '{output_filename}': {remove_error}"
+                        );
+                    }
+                    process::exit(1);
+                }
+
+                if cli.verbose {
+                    println!("Verification successful");
+                }
+            }
+
+            if cli.verbose {
+                let speed_mibs = if elapsed.as_secs_f64() > 0.0 {
+                    (uncompressed_size as f64) / (1024.0 * 1024.0 * elapsed.as_secs_f64())
+                } else {
+                    0.0
+                };
+
+                if cli.inputs.len() > 1 {
+                    println!("File: {input_str}");
+                }
+                println!("Compressed:   {}", format_size(compressed_size));
+                println!("Uncompressed: {}", format_size(uncompressed_size));
+                println!(
+                    "Compression ratio: {:.2}%",
+                    if uncompressed_size > 0 {
+                        (compressed_size as f64 / uncompressed_size as f64) * 100.0
+                    } else {
+                        0.0
+                    },
+                );
+                println!("Compression time: {:.3}s", elapsed.as_secs_f64(),);
+                println!("Compression speed: {speed_mibs:.1} MiB/s");
+                if cli.inputs.len() > 1 {
+                    println!();
+                }
+            }
+
+            if !cli.keep
+                && let Err(error) = fs::remove_file(&input_str)
+            {
+                eprintln!("Warning: Failed to remove input file '{input_str}': {error}");
+            }
         }
     }
 
