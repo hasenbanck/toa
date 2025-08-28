@@ -23,6 +23,11 @@ against bit rot. It uses LZMA2s, a special variant of LZMA as it's compression a
 the format may evolve before reaching version 1.0. The specification is thoroughly documented
 in [SPECIFICATION.md](SPECIFICATION.md).
 
+## Bindings
+
+A simple C based API that other languages can use to add support for TOA can be found in the `libtoa-native` folder.
+It's currently in a proof of concept stage and is to be expected to be heavily extended / reworked.
+
 ## Compression Performance
 
 Benchmark results for `toa.exe` (903K original):
@@ -203,7 +208,6 @@ TOA combines proven technologies in a novel way:
     - Multiple files: Use different, potentially corrupted version of a file (for example from different media) and
       try to repair both of them by using incremental repair routines.
 - Extending the libtoa (Rust) library to support more use-cases
-- Add a C interface and provide static / dynamic libraries to link against (for natively supporting more languages)
 
 ## Acknowledgement
 

@@ -1,0 +1,20 @@
+[package]
+name = "libtoa-native"
+version = "0.2.0"
+description = "C library interface for TOA compression format"
+authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+keywords = ["lzma", "toa", "compression", "ffi", "c"]
+categories = ["compression", "api-bindings", "external-ffi-bindings"]
+repository = "https://github.com/hasenbanck/toa/"
+homepage = "https://github.com/hasenbanck/toa/"
+publish = false
+
+[lib]
+name = "libtoa"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+libtoa = { version = "0.2", path = "../libtoa", default-features = false, features = ["std", "optimization"] }
