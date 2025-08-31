@@ -5,17 +5,15 @@
 //! uses LZMA as the primary compression algorithm with BLAKE3 cryptographic hashing and
 //! Reed-Solomon error correction codes.
 //!
-//! ## ⚠ Specification Status ⚠
+//! ## Specification
 //!
-//! **TOA is still experimental, do NOT use it in production yet**
-//!
-//! **Note: The TOA format is currently in draft mode (v0.10) and not yet frozen. The specification
-//! may change in future versions.**
+//! The specification of the file format version 1.0 is finished and can be read in
+//! the SPECIFICATION.md in the source repository.
 //!
 //! ## Acknowledgement
 //!
 //! - The lzma code is a hard copy of the lzma-rust crate (Apache 2 license).
-//! - Original Author of the lzma-rust crate was dyz1990 (Apache 2 license)
+//! - Original Author of the lzma-rust crate was dyz1990 (Apache 2 license).
 //! - The lzma-rust2 crate was a rewrite of the XZ for Java by Lasse Collin (0BSD).
 //! - Major parts of XZ for Java are based on code written by Igor Pavlov in the LZMA SDK
 //!   (public domain).

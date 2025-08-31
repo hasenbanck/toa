@@ -1,6 +1,6 @@
 # TOA File Format Specification
 
-Version 0.10
+Version 1.0
 
 ## 1. Introduction
 
@@ -1061,6 +1061,7 @@ Files using this format SHOULD use the extension `.toa`.
 
 ## Revision History
 
+- Version 1.0 (2025-08-31): Freeze of the specification. Release as version 1.0
 - Version 0.10 (2025-08-27): Change wording of the LZMA2s normative section
 - Version 0.9  (2025-08-22): Changes in the ECC:
     - Switched polynomial for Reed-Solomon ECC from 0x11D (x^8 + x^4 + x^3 + x^2 + 1) to

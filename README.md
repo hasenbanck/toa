@@ -15,13 +15,10 @@ against bit rot. It uses LZMA2s, a special variant of LZMA as it's compression a
 - **Streaming & Parallel**: Process data as it arrives with multi-core support
 - **Executable Optimization**: Optional BCJ filters for better executable compression
 
-## ⚠ Specification Status ⚠
+## Specification
 
-**TOA is still experimental, do NOT use it in production yet**
-
-**Note**: TOA format is currently at specification version 0.10 and not yet frozen. While the core features are stable,
-the format may evolve before reaching version 1.0. The specification is thoroughly documented
-in [SPECIFICATION.md](SPECIFICATION.md).
+The specification of the file format version 1.0 is finished and can be read in
+the [SPECIFICATION.md](SPECIFICATION.md).
 
 ## Bindings
 
@@ -208,11 +205,12 @@ TOA combines proven technologies in a novel way:
     - Multiple files: Use different, potentially corrupted version of a file (for example from different media) and
       try to repair both of them by using incremental repair routines.
 - Extending the libtoa (Rust) library to support more use-cases
+- Extending the libtoa-native (C) library to support more use-cases
 
 ## Acknowledgement
 
 - The lzma code is a hard copy of the lzma-rust crate (Apache 2 license).
-- Original Author of the lzma-rust crate was dyz1990 (Apache 2 license)
+- Original Author of the lzma-rust crate was dyz1990 (Apache 2 license).
 - The lzma-rust2 crate was a rewrite of the XZ for Java by Lasse Collin (0BSD).
 - Major parts of XZ for Java are based on code written by Igor Pavlov in the LZMA SDK (public domain).
 
