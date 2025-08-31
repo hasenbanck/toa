@@ -258,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "libtoa"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "criterion",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "libtoa-native"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libtoa",
 ]
@@ -482,7 +482,7 @@ dependencies = [
 
 [[package]]
 name = "toa"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "glob",
