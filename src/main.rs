@@ -1,6 +1,7 @@
 mod compression;
 mod decompression;
 mod list;
+mod test_simd;
 mod util;
 
 use std::{fs, io::Result, path::PathBuf, process};
@@ -13,6 +14,7 @@ use crate::{
     compression::compress_file,
     decompression::{decompress_file, test_file},
     list::list_file_info,
+    test_simd::test_simd_features,
     util::format_size,
 };
 
@@ -22,6 +24,7 @@ struct Cli {
     extract: bool,
     list: bool,
     test: bool,
+    test_simd: bool,
     keep: bool,
     verify: bool,
     verbose: bool,
@@ -55,7 +58,7 @@ impl Cli {
                 Arg::new("input")
                     .help("Input file(s) to compress or decompress (supports wildcards)")
                     .value_name("FILE")
-                    .required(true)
+                    .required_unless_present("test-simd")
                     .num_args(1..)
                     .index(1),
             )
@@ -79,6 +82,13 @@ impl Cli {
                     .help("Test decompression without storing output")
                     .long("test")
                     .action(clap::ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("test-simd")
+                    .help("Test available SIMD CPU features")
+                    .long("test-simd")
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(["extract", "list", "test"]),
             )
             .arg(
                 Arg::new("keep")
@@ -326,9 +336,11 @@ impl Cli {
             n => n,
         };
 
+        let test_simd = matches.get_flag("test-simd");
+
         let input_patterns: Vec<String> = matches
             .get_many::<String>("input")
-            .unwrap()
+            .unwrap_or_default()
             .cloned()
             .collect();
 
@@ -358,7 +370,7 @@ impl Cli {
             }
         }
 
-        if inputs.is_empty() {
+        if inputs.is_empty() && !test_simd {
             eprintln!("Error: No files found matching the specified pattern(s)");
             process::exit(1);
         }
@@ -369,6 +381,7 @@ impl Cli {
             extract: matches.get_flag("extract"),
             list: matches.get_flag("list"),
             test: matches.get_flag("test"),
+            test_simd,
             keep: matches.get_flag("keep"),
             verify: matches.get_flag("verify"),
             verbose: matches.get_flag("verbose"),
@@ -452,6 +465,10 @@ impl Cli {
 fn main() -> Result<()> {
     let matches = Cli::build_command().get_matches();
     let cli = Cli::from_matches(&matches);
+
+    if cli.test_simd {
+        test_simd_features();
+    }
 
     // Check for output argument conflicts with multiple files.
     if cli.inputs.len() > 1 && cli.output.is_some() {
