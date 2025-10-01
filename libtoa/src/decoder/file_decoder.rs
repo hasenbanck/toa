@@ -15,7 +15,7 @@ use crate::{
     cv_stack::CVStack,
     decoder::Decoder,
     error_invalid_data,
-    header::TOABlockHeader,
+    header::{TOABlockHeader, is_trailer_after_ecc},
     work_queue::{WorkStealingQueue, WorkerHandle},
 };
 
@@ -141,13 +141,14 @@ impl TOAFileDecoder {
                 break;
             }
 
-            let is_trailer = (header_data[0] & 0x80) != 0;
+            // Apply ECC before checking MSB to prevent corrupted bit from causing misidentification.
+            let is_trailer = is_trailer_after_ecc(&header_data, true)?;
             if is_trailer {
-                // This is the file trailer, we're done with blocks
+                // This is the file trailer, we're done with blocks.
                 break;
             }
 
-            let block_header = TOABlockHeader::parse(&header_data, false)?;
+            let block_header = TOABlockHeader::parse(&header_data, true)?;
             let compressed_size = block_header.physical_size();
 
             blocks.push(BlockWork {

@@ -2,7 +2,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use crate::{
     Prefilter,
-    header::{TOABlockHeader, TOAHeader},
+    header::{TOABlockHeader, TOAHeader, is_trailer_after_ecc},
     trailer::TOAFileTrailer,
 };
 
@@ -64,7 +64,7 @@ impl TOAMetadata {
             decoder.read_exact(&mut buffer)?;
 
             // Check bit 0 (MSB) to determine if this is a block header or final trailer.
-            if (buffer[0] & 0x80) != 0 {
+            if is_trailer_after_ecc(&buffer, true)? {
                 let trailer_result = TOAFileTrailer::parse(&buffer, true);
                 let (trailer, validated, corrected) = match trailer_result {
                     Ok(trailer) => (trailer, true, false),

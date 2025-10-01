@@ -165,7 +165,12 @@ fn bench_ecc_decoder(
         return;
     }
 
+    #[cfg(target_arch = "x86_64")]
     let encoded_data = generate_encoded_data(error_correction, SimdOverride::ForceAvx2Gfni);
+
+    #[cfg(target_arch = "aarch64")]
+    let encoded_data = generate_encoded_data(error_correction, SimdOverride::ForceNeon);
+
     let throughput = Throughput::Bytes(encoded_data.len() as u64);
     group.throughput(throughput);
 

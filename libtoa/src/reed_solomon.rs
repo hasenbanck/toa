@@ -1286,7 +1286,9 @@ pub mod code_32_10 {
     const CODEWORD_SIZE: usize = DATA_LEN + PARITY_LEN;
 
     /// Safe upper bound for intermediate polynomials.
-    const MAX_POLY: usize = CODEWORD_SIZE;
+    ///
+    /// Running tests it seems that we needed to increase the size by one when having 11 errors.
+    const MAX_POLY: usize = CODEWORD_SIZE + 1;
 
     pub(super) static GEN_POLY: [u8; PARITY_LEN_PLUS_ONE] =
         super::primitives::gen_poly_const::<PARITY_LEN, _>();

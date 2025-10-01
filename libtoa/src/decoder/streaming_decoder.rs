@@ -2,7 +2,10 @@ use blake3::hazmat::HasherExt;
 
 use super::Decoder;
 use crate::{
-    Read, Result, TOAHeader, cv_stack::CVStack, error_invalid_data, header::TOABlockHeader,
+    Read, Result, TOAHeader,
+    cv_stack::CVStack,
+    error_invalid_data,
+    header::{TOABlockHeader, is_trailer_after_ecc},
     trailer::TOAFileTrailer,
 };
 
@@ -63,8 +66,9 @@ impl<R: Read> TOAStreamingDecoder<R> {
         let mut header_data = [0u8; 64];
         inner.read_exact(&mut header_data)?;
 
-        // Check bit 0 (MSB) to determine if this is a block header or final trailer.
-        match (header_data[0] & 0x80) != 0 {
+        // Apply ECC before checking MSB to prevent corrupted bit from causing misidentification.
+        let is_trailer = is_trailer_after_ecc(&header_data, self.validate_rs)?;
+        match is_trailer {
             true => {
                 // MSB=1: This is the final trailer.
                 self.blocks_finished = true;

@@ -1,6 +1,6 @@
 use super::{
-    ErrorCorrection, Prefilter, TOA_MAGIC, TOA_VERSION, TOAOptions, Write, error_invalid_data,
-    error_unsupported, lzma,
+    ErrorCorrection, Prefilter, Result, TOA_MAGIC, TOA_VERSION, TOAOptions, Write,
+    error_invalid_data, error_unsupported, lzma,
     reed_solomon::{code_32_10, code_64_40},
 };
 
@@ -279,6 +279,32 @@ impl TOABlockHeader {
         header_bytes[40..64].copy_from_slice(&self.rs_parity);
 
         encoder.write_all(&header_bytes)
+    }
+}
+
+/// Determines whether a 64-byte buffer is a file trailer or block header after applying ECC.
+///
+/// This function safely checks the MSB (bit 63) to distinguish between:
+/// - File trailer: MSB = 1
+/// - Block header: MSB = 0
+///
+/// The MSB check is only performed after optional Reed-Solomon error correction to ensure
+/// corrupted bits don't cause misidentification.
+///
+/// # Returns
+/// - `Ok(true)` if the buffer is a file trailer
+/// - `Ok(false)` if the buffer is a block header
+/// - `Err` if Reed-Solomon correction fails
+pub fn is_trailer_after_ecc(buffer: &[u8; 64], apply_rs_correction: bool) -> Result<bool> {
+    if apply_rs_correction {
+        let mut codeword = *buffer;
+
+        code_64_40::decode(&mut codeword)
+            .map_err(|_| error_invalid_data("Reed-Solomon correction failed for header/trailer"))?;
+
+        Ok((codeword[0] & 0x80) != 0)
+    } else {
+        Ok((buffer[0] & 0x80) != 0)
     }
 }
 
