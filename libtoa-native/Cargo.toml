@@ -1,6 +1,6 @@
 [package]
 name = "libtoa-native"
-version = "0.3.0"
+version = "0.4.0"
 description = "C library interface for TOA compression format"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
 edition = "2024"
@@ -17,4 +17,4 @@ name = "libtoa"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-libtoa = { version = "0.3", path = "../libtoa", default-features = false, features = ["std", "optimization"] }
+libtoa = { version = "0.4", path = "../libtoa", default-features = false, features = ["std", "optimization"] }
